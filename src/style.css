@@ -140,13 +140,13 @@ select:focus {
 button {
   border: 1px solid transparent;
   border-radius: var(--radius);
-  padding: 12px 16px;
-  font-size: 15px;
+  padding: 9px 14px;
+  font-size: 14px;
   font-weight: 600;
-  color: #021222;
-  background: linear-gradient(120deg, var(--accent), var(--accent-strong));
+  color: #03152a;
+  background: linear-gradient(120deg, rgba(77, 166, 255, 0.9), rgba(116, 209, 255, 0.9));
   transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
-  box-shadow: 0 8px 20px rgba(20, 191, 252, 0.25);
+  box-shadow: 0 6px 14px rgba(43, 122, 205, 0.28);
 }
 
 button:disabled {
@@ -163,8 +163,8 @@ button:not(:disabled):hover {
 }
 
 .primary {
-  background: linear-gradient(120deg, var(--accent), var(--accent-strong));
-  border-color: transparent;
+  background: linear-gradient(120deg, rgba(77, 166, 255, 0.9), rgba(116, 209, 255, 0.9));
+  border-color: rgba(77, 166, 255, 0.4);
 }
 
 .primary.ghost {
@@ -177,7 +177,7 @@ button:not(:disabled):hover {
 .secondary {
   background: var(--accent-soft);
   color: var(--accent);
-  border: 1px solid var(--accent-soft);
+  border: 1px solid rgba(77, 166, 255, 0.25);
 }
 
 .secondary.ghost {
@@ -187,10 +187,10 @@ button:not(:disabled):hover {
 }
 
 .danger {
-  background: linear-gradient(120deg, var(--danger), #ff4161);
-  border-color: transparent;
+  background: linear-gradient(120deg, rgba(255, 107, 143, 0.9), rgba(255, 138, 166, 0.85));
+  border-color: rgba(255, 107, 143, 0.45);
   color: #fff;
-  box-shadow: 0 8px 20px rgba(255, 114, 136, 0.25);
+  box-shadow: 0 6px 14px rgba(255, 107, 143, 0.28);
 }
 
 .danger.ghost {
@@ -432,6 +432,12 @@ button:not(:disabled):hover {
 .status-chip.status-unknown {
   background: rgba(255, 255, 255, 0.1);
   color: var(--text-muted);
+}
+
+.status-badge.status-waiting-sell {
+  background: rgba(255, 107, 143, 0.25);
+  color: #ffc3d1;
+  border: 1px solid rgba(255, 107, 143, 0.5);
 }
 
 .order-list {

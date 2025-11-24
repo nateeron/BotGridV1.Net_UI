@@ -433,7 +433,11 @@ export default function App() {
                       <strong>{order?.symbol || '—'}</strong>
                       <span className="order-card__id">#{order?.id ?? '—'}</span>
                     </div>
-                    <span className={`status-badge status-${(order?.status || 'unknown').toLowerCase()}`}>
+                    <span
+                      className={`status-badge status-${(order?.status || 'unknown').toLowerCase()} ${
+                        order?.status === 'WAITING_SELL' ? 'status-waiting-sell' : ''
+                      }`}
+                    >
                       {order?.status || 'Unknown'}
                     </span>
                   </header>
@@ -471,14 +475,32 @@ export default function App() {
                     </div>
                   </div>
                   <div className="button-group order-card__actions">
-                    <button className="danger" type="button" onClick={() => handleDeleteOrder(order)}>
-                      Delete
+                    <button
+                      className="danger"
+                      type="button"
+                      onClick={() => handleDeleteOrder(order)}
+                      aria-label="Delete order"
+                      title="Delete order"
+                    >
+                      🗑
                     </button>
-                    <button className="secondary" type="button" onClick={() => openOrderEditModal(order)}>
-                      Edit Order
+                    <button
+                      className="secondary"
+                      type="button"
+                      onClick={() => openOrderEditModal(order)}
+                      aria-label="Edit order"
+                      title="Edit order"
+                    >
+                      ✏️
                     </button>
-                    <button className="primary ghost" type="button" onClick={() => openSellModal(order)}>
-                      Sell Now
+                    <button
+                      className="primary ghost"
+                      type="button"
+                      onClick={() => openSellModal(order)}
+                      aria-label="Sell now"
+                      title="Sell now"
+                    >
+                      ⚡️
                     </button>
                   </div>
                 </article>
@@ -547,12 +569,24 @@ export default function App() {
                 <span className="label">Message</span>
                 <p>{message}</p>
               </div>
-              <div className="button-group">
-                <button className="primary" type="button" onClick={() => handleBotAction('start', setting.id)}>
-                  Start
+              <div className="button-group icon-buttons">
+                <button
+                  className="primary"
+                  type="button"
+                  onClick={() => handleBotAction('start', setting.id)}
+                  aria-label="Start bot"
+                  title="Start bot"
+                >
+                  ▶
                 </button>
-                <button className="danger" type="button" onClick={() => handleBotAction('stop', setting.id)}>
-                  Stop
+                <button
+                  className="danger"
+                  type="button"
+                  onClick={() => handleBotAction('stop', setting.id)}
+                  aria-label="Stop bot"
+                  title="Stop bot"
+                >
+                  ⏹
                 </button>
               </div>
             </article>
