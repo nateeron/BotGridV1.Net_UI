@@ -1,0 +1,996 @@
+{
+	"info": {
+		"_postman_id": "6236fc10-977f-4a63-9836-993b70b39611",
+		"name": "BotGrid.Net",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "25349815",
+		"_collection_link": "https://gold-moon-45015.postman.co/workspace/TVBot~009ddc1e-ea1f-4c9b-9066-260e6b3c2feb/collection/25349815-6236fc10-977f-4a63-9836-993b70b39611?action=share&source=collection_link&creator=25349815"
+	},
+	"item": [
+		{
+			"name": "SQLite",
+			"item": [
+				{
+					"name": "check-database",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{url}}api/SQLite/CheckAndCreateDatabase",
+							"host": [
+								"{{url}}api"
+							],
+							"path": [
+								"SQLite",
+								"CheckAndCreateDatabase"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Success",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "{{url}}api/SQLite/check-database",
+									"host": [
+										"{{url}}api"
+									],
+									"path": [
+										"SQLite",
+										"check-database"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Date",
+									"value": "Sun, 23 Nov 2025 07:37:17 GMT"
+								},
+								{
+									"key": "Server",
+									"value": "Kestrel"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"success\": true,\n    \"databaseExists\": true,\n    \"tableExists\": true,\n    \"hasData\": false,\n    \"message\": \"Database and table created successfully\"\n}"
+						}
+					]
+				},
+				{
+					"name": "GetAll",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{url}}api/SQLite/GetAll",
+							"host": [
+								"{{url}}api"
+							],
+							"path": [
+								"SQLite",
+								"GetAll"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "success",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{url}}api/SQLite/GetAll",
+									"host": [
+										"{{url}}api"
+									],
+									"path": [
+										"SQLite",
+										"GetAll"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Date",
+									"value": "Sun, 23 Nov 2025 07:45:42 GMT"
+								},
+								{
+									"key": "Server",
+									"value": "Kestrel"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [],
+							"body": "[\n    {\n        \"id\": 1,\n        \"config_Version\": 1,\n        \"apI_KEY\": \"your-api-key\",\n        \"apI_SECRET\": \"your-secret\",\n        \"disCord_Hook1\": \"https://discord.com/api/webhooks/xxxx\",\n        \"disCord_Hook2\": \"https://discord.com/api/webhooks/yyyy\",\n        \"symbol\": \"BTCUSDT\",\n        \"perceN_BUY\": 1.25,\n        \"perceN_SELL\": 1.4\n    }\n]"
+						}
+					]
+				},
+				{
+					"name": "GetById",
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "id",
+									"value": "0",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{url}}api/SQLite/GetById",
+							"host": [
+								"{{url}}api"
+							],
+							"path": [
+								"SQLite",
+								"GetById"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "success",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n    \"id\":0\r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{url}}api/SQLite/GetById",
+									"host": [
+										"{{url}}api"
+									],
+									"path": [
+										"SQLite",
+										"GetById"
+									]
+								}
+							},
+							"status": "Not Found",
+							"code": 404,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Date",
+									"value": "Sun, 23 Nov 2025 07:43:23 GMT"
+								},
+								{
+									"key": "Server",
+									"value": "Kestrel"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"success\": false,\n    \"message\": \"Setting with ID 0 not found\"\n}"
+						}
+					]
+				},
+				{
+					"name": "CreateSetting",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"Config_Version\": 3,\r\n    \"API_KEY\": \"YcPKKIzIXkYec2bT2ecKQSrFNauM1X99WlOjCpcqxeD8leTvLOR1KsyZxDm6ZYSC\",\r\n    \"API_SECRET\": \"gVptG2cBQy0jyieXU0G8c3iucaj2JzFQthcPQYvNdnSwUZFQKK56WfKhwA08Gjs4\",\r\n    \"DisCord_Hook1\": \"https://discordapp.com/api/webhooks/1305736224878755850/SfGQMU2UDYAH6a3K41secM-VmhrID2TMwdCKJ8-XMfAG05XhK1P9fG_ltwe7RcZh4yZo\",\r\n    \"DisCord_Hook2\": \"\",\r\n    \"SYMBOL\": \"XRPUSDT\",\r\n    \"PERCEN_BUY\": 0.4,\r\n    \"PERCEN_SELL\":0.4,\r\n    \"buyAmountUSD\": 11.2\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{url}}api/SQLite/CreateSetting",
+							"host": [
+								"{{url}}api"
+							],
+							"path": [
+								"SQLite",
+								"CreateSetting"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "success 1",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n  \"Id\": 1,\r\n  \"Config_Version\": 1,\r\n  \"API_KEY\": \"your-api-key\",\r\n  \"API_SECRET\": \"your-secret\",\r\n  \"DisCord_Hook1\": \"https://discord.com/api/webhooks/xxxx\",\r\n  \"DisCord_Hook2\": \"https://discord.com/api/webhooks/yyyy\",\r\n  \"SYMBOL\": \"BTCUSDT\",\r\n  \"PERCEN_BUY\": 1.25,\r\n  \"PERCEN_SELL\": 1.40\r\n}\r\n",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{url}}api/SQLite/CreateSetting",
+									"host": [
+										"{{url}}api"
+									],
+									"path": [
+										"SQLite",
+										"CreateSetting"
+									]
+								}
+							},
+							"status": "Created",
+							"code": 201,
+							"_postman_previewlanguage": "",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Date",
+									"value": "Sun, 23 Nov 2025 07:45:36 GMT"
+								},
+								{
+									"key": "Server",
+									"value": "Kestrel"
+								},
+								{
+									"key": "Location",
+									"value": "http://localhost:5081/api/SQLite/GetById?id=1"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [
+								{
+									"expires": "Invalid Date",
+									"domain": "",
+									"path": ""
+								}
+							],
+							"body": "{\n    \"id\": 1,\n    \"config_Version\": 1,\n    \"apI_KEY\": \"your-api-key\",\n    \"apI_SECRET\": \"your-secret\",\n    \"disCord_Hook1\": \"https://discord.com/api/webhooks/xxxx\",\n    \"disCord_Hook2\": \"https://discord.com/api/webhooks/yyyy\",\n    \"symbol\": \"BTCUSDT\",\n    \"perceN_BUY\": 1.25,\n    \"perceN_SELL\": 1.4\n}"
+						},
+						{
+							"name": "success 2 not id",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n \r\n  \"Config_Version\": 1,\r\n  \"API_KEY\": \"your-api-key\",\r\n  \"API_SECRET\": \"your-secret\",\r\n  \"DisCord_Hook1\": \"https://discord.com/api/webhooks/xxxx\",\r\n  \"DisCord_Hook2\": \"https://discord.com/api/webhooks/yyyy\",\r\n  \"SYMBOL\": \"BTCUSDT\",\r\n  \"PERCEN_BUY\": 1.25,\r\n  \"PERCEN_SELL\": 1.40\r\n}\r\n",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{url}}api/SQLite/CreateSetting",
+									"host": [
+										"{{url}}api"
+									],
+									"path": [
+										"SQLite",
+										"CreateSetting"
+									]
+								}
+							},
+							"status": "Created",
+							"code": 201,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Date",
+									"value": "Sun, 23 Nov 2025 07:47:37 GMT"
+								},
+								{
+									"key": "Server",
+									"value": "Kestrel"
+								},
+								{
+									"key": "Location",
+									"value": "http://localhost:5081/api/SQLite/GetById?id=2"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"id\": 2,\n    \"config_Version\": 1,\n    \"apI_KEY\": \"your-api-key\",\n    \"apI_SECRET\": \"your-secret\",\n    \"disCord_Hook1\": \"https://discord.com/api/webhooks/xxxx\",\n    \"disCord_Hook2\": \"https://discord.com/api/webhooks/yyyy\",\n    \"symbol\": \"BTCUSDT\",\n    \"perceN_BUY\": 1.25,\n    \"perceN_SELL\": 1.4\n}"
+						}
+					]
+				},
+				{
+					"name": "Delete",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"id\":2\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{url}}api/SQLite/Delete",
+							"host": [
+								"{{url}}api"
+							],
+							"path": [
+								"SQLite",
+								"Delete"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "success",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n    \"id\":2\r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{url}}api/SQLite/Delete",
+									"host": [
+										"{{url}}api"
+									],
+									"path": [
+										"SQLite",
+										"Delete"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Date",
+									"value": "Sun, 23 Nov 2025 07:50:36 GMT"
+								},
+								{
+									"key": "Server",
+									"value": "Kestrel"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"success\": true,\n    \"message\": \"Setting deleted successfully\"\n}"
+						}
+					]
+				},
+				{
+					"name": "Update",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n  \"id\":1,\r\n  \"Config_Version\": 3,\r\n  \"API_KEY\": \"YcPKKIzIXkYec2bT2ecKQSrFNauM1X99WlOjCpcqxeD8leTvLOR1KsyZxDm6ZYSC\",\r\n  \"API_SECRET\": \"gVptG2cBQy0jyieXU0G8c3iucaj2JzFQthcPQYvNdnSwUZFQKK56WfKhwA08Gjs4\",\r\n  \"DisCord_Hook1\": \"https://discordapp.com/api/webhooks/1305736224878755850/SfGQMU2UDYAH6a3K41secM-VmhrID2TMwdCKJ8-XMfAG05XhK1P9fG_ltwe7RcZh4yZo\",\r\n  \"DisCord_Hook2\": \"\",\r\n  \"SYMBOL\": \"XRPUSDT\",\r\n  \"PERCEN_BUY\": 0.4,\r\n  \"PERCEN_SELL\":0.4,\r\n  \"buyAmountUSD\":11.2\r\n    \r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{url}}api/SQLite/Update",
+							"host": [
+								"{{url}}api"
+							],
+							"path": [
+								"SQLite",
+								"Update"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Success",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n  \"id\":1,\r\n  \"Config_Version\": 3,\r\n  \"API_KEY\": \"your-api-keysss\",\r\n  \"API_SECRET\": \"your-secretsss\",\r\n  \"DisCord_Hook1\": \"https://discord.com/api/webhooks/xxxx\",\r\n  \"DisCord_Hook2\": \"https://discord.com/api/webhooks/yyyy\",\r\n  \"SYMBOL\": \"BTCUSDT\",\r\n  \"PERCEN_BUY\": 1.25,\r\n  \"PERCEN_SELL\": 1.40\r\n    \r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{url}}api/SQLite/Update",
+									"host": [
+										"{{url}}api"
+									],
+									"path": [
+										"SQLite",
+										"Update"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Date",
+									"value": "Sun, 23 Nov 2025 07:53:13 GMT"
+								},
+								{
+									"key": "Server",
+									"value": "Kestrel"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"success\": true,\n    \"message\": \"Setting updated successfully\",\n    \"data\": {\n        \"id\": 1,\n        \"config_Version\": 3,\n        \"apI_KEY\": \"your-api-keysss\",\n        \"apI_SECRET\": \"your-secretsss\",\n        \"disCord_Hook1\": \"https://discord.com/api/webhooks/xxxx\",\n        \"disCord_Hook2\": \"https://discord.com/api/webhooks/yyyy\",\n        \"symbol\": \"BTCUSDT\",\n        \"perceN_BUY\": 1.25,\n        \"perceN_SELL\": 1.4\n    }\n}"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Binace",
+			"item": [
+				{
+					"name": "GetSpotReport",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n  \"ConfigId\":1,\r\n  \"Period\": \"1M\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{url}}api/Binace/GetSpotReport",
+							"host": [
+								"{{url}}api"
+							],
+							"path": [
+								"Binace",
+								"GetSpotReport"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "success",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n  \"ConfigId\":1,\r\n  \"Period\": \"1M\"\r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{url}}api/Binace/GetSpotReport",
+									"host": [
+										"{{url}}api"
+									],
+									"path": [
+										"Binace",
+										"GetSpotReport"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Date",
+									"value": "Sun, 23 Nov 2025 09:05:56 GMT"
+								},
+								{
+									"key": "Server",
+									"value": "Kestrel"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"success\": true,\n    \"message\": \"Report generated successfully\",\n    \"portfolioValue\": 34.71345094978,\n    \"ordersWaiting\": 0,\n    \"ordersSuccess\": 2,\n    \"period\": \"1M\",\n    \"additionalData\": {\n        \"TotalOrders\": 6,\n        \"Symbol\": \"XRPUSDT\"\n    }\n}"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "BotWorker",
+			"item": [
+				{
+					"name": "GetPriceRealtime",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"Symbol\":\"XRPUSDT\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{url}}api/BotWorker/GetPriceRealtime",
+							"host": [
+								"{{url}}api"
+							],
+							"path": [
+								"BotWorker",
+								"GetPriceRealtime"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Start",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"ConfigId\":1\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{url}}api/BotWorker/Start",
+							"host": [
+								"{{url}}api"
+							],
+							"path": [
+								"BotWorker",
+								"Start"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Stop",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{url}}api/BotWorker/Stop",
+							"host": [
+								"{{url}}api"
+							],
+							"path": [
+								"BotWorker",
+								"Stop"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "CheckStatus",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{url}}api/BotWorker/CheckStatus",
+							"host": [
+								"{{url}}api"
+							],
+							"path": [
+								"BotWorker",
+								"CheckStatus"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "CheckStatus",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "{{url}}api/BotWorker/CheckStatus",
+									"host": [
+										"{{url}}api"
+									],
+									"path": [
+										"BotWorker",
+										"CheckStatus"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Date",
+									"value": "Sun, 23 Nov 2025 10:18:29 GMT"
+								},
+								{
+									"key": "Server",
+									"value": "Kestrel"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"success\": true,\n    \"status\": \"STOPPED\",\n    \"isRunning\": false,\n    \"message\": \"Bot worker is stopped\"\n}"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Order",
+			"item": [
+				{
+					"name": "GetOrders",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{url}}api/SQLite/GetOrders",
+							"host": [
+								"{{url}}api"
+							],
+							"path": [
+								"SQLite",
+								"GetOrders"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Success",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "{{url}}api/SQLite/GetOrders",
+									"host": [
+										"{{url}}api"
+									],
+									"path": [
+										"SQLite",
+										"GetOrders"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Date",
+									"value": "Sun, 23 Nov 2025 14:27:37 GMT"
+								},
+								{
+									"key": "Server",
+									"value": "Kestrel"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"success\": true,\n    \"count\": 2,\n    \"data\": [\n        {\n            \"id\": 2,\n            \"timestamp\": \"2025-11-23T14:07:26.5287131\",\n            \"orderBuyID\": \"13362288124\",\n            \"priceBuy\": 2.0569,\n            \"priceWaitSell\": 2.06615605,\n            \"orderSellID\": null,\n            \"priceSellActual\": null,\n            \"profitLoss\": null,\n            \"dateBuy\": \"2025-11-23T14:07:26.52899\",\n            \"dateSell\": null,\n            \"setting_ID\": 1,\n            \"status\": \"WAITING_SELL\",\n            \"symbol\": \"XRPUSDT\",\n            \"quantity\": 5.4,\n            \"buyAmountUSD\": 11.2,\n            \"coinQuantity\": 5.4\n        },\n        {\n            \"id\": 1,\n            \"timestamp\": \"2025-11-23T14:07:26.5287098\",\n            \"orderBuyID\": \"13362288123\",\n            \"priceBuy\": 2.0569,\n            \"priceWaitSell\": 2.06615605,\n            \"orderSellID\": null,\n            \"priceSellActual\": null,\n            \"profitLoss\": null,\n            \"dateBuy\": \"2025-11-23T14:07:26.5289857\",\n            \"dateSell\": null,\n            \"setting_ID\": 1,\n            \"status\": \"WAITING_SELL\",\n            \"symbol\": \"XRPUSDT\",\n            \"quantity\": 5.4,\n            \"buyAmountUSD\": 11.2,\n            \"coinQuantity\": 5.4\n        }\n    ]\n}"
+						},
+						{
+							"name": "GetOrders IS Sell",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "{{url}}api/SQLite/GetOrders",
+									"host": [
+										"{{url}}api"
+									],
+									"path": [
+										"SQLite",
+										"GetOrders"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Date",
+									"value": "Sun, 23 Nov 2025 15:08:24 GMT"
+								},
+								{
+									"key": "Server",
+									"value": "Kestrel"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"success\": true,\n    \"count\": 1,\n    \"data\": [\n        {\n            \"id\": 5,\n            \"timestamp\": \"2025-11-23T15:05:44.5691418\",\n            \"orderBuyID\": \"13362888647\",\n            \"priceBuy\": 2.0389,\n            \"priceWaitSell\": 2.0429778,\n            \"orderSellID\": \"13362911781\",\n            \"priceSellActual\": 2.043,\n            \"profitLoss\": 0.0041,\n            \"dateBuy\": \"2025-11-23T15:05:44.5692535\",\n            \"dateSell\": \"2025-11-23T15:08:00.7309792\",\n            \"setting_ID\": 1,\n            \"status\": \"SOLD\",\n            \"symbol\": \"XRPUSDT\",\n            \"quantity\": 5.4,\n            \"buyAmountUSD\": 11.2,\n            \"coinQuantity\": 5.4\n        }\n    ]\n}"
+						}
+					]
+				},
+				{
+					"name": "GetOrdersBySettingId",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"id\":1\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{url}}api/SQLite/GetOrdersBySettingId",
+							"host": [
+								"{{url}}api"
+							],
+							"path": [
+								"SQLite",
+								"GetOrdersBySettingId"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Success",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\r\n    \"id\":1\r\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{url}}api/SQLite/GetOrdersBySettingId",
+									"host": [
+										"{{url}}api"
+									],
+									"path": [
+										"SQLite",
+										"GetOrdersBySettingId"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Date",
+									"value": "Sun, 23 Nov 2025 14:27:13 GMT"
+								},
+								{
+									"key": "Server",
+									"value": "Kestrel"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"success\": true,\n    \"settingId\": 1,\n    \"count\": 2,\n    \"data\": [\n        {\n            \"id\": 2,\n            \"timestamp\": \"2025-11-23T14:07:26.5287131\",\n            \"orderBuyID\": \"13362288124\",\n            \"priceBuy\": 2.0569,\n            \"priceWaitSell\": 2.06615605,\n            \"orderSellID\": null,\n            \"priceSellActual\": null,\n            \"profitLoss\": null,\n            \"dateBuy\": \"2025-11-23T14:07:26.52899\",\n            \"dateSell\": null,\n            \"setting_ID\": 1,\n            \"status\": \"WAITING_SELL\",\n            \"symbol\": \"XRPUSDT\",\n            \"quantity\": 5.4,\n            \"buyAmountUSD\": 11.2,\n            \"coinQuantity\": 5.4\n        },\n        {\n            \"id\": 1,\n            \"timestamp\": \"2025-11-23T14:07:26.5287098\",\n            \"orderBuyID\": \"13362288123\",\n            \"priceBuy\": 2.0569,\n            \"priceWaitSell\": 2.06615605,\n            \"orderSellID\": null,\n            \"priceSellActual\": null,\n            \"profitLoss\": null,\n            \"dateBuy\": \"2025-11-23T14:07:26.5289857\",\n            \"dateSell\": null,\n            \"setting_ID\": 1,\n            \"status\": \"WAITING_SELL\",\n            \"symbol\": \"XRPUSDT\",\n            \"quantity\": 5.4,\n            \"buyAmountUSD\": 11.2,\n            \"coinQuantity\": 5.4\n        }\n    ]\n}"
+						}
+					]
+				},
+				{
+					"name": "DeleteOrder",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"id\":2\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{url}}api/SQLite/DeleteOrder",
+							"host": [
+								"{{url}}api"
+							],
+							"path": [
+								"SQLite",
+								"DeleteOrder"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "DeleteOrders",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"id\":[2,1]\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{url}}api/SQLite/DeleteOrders",
+							"host": [
+								"{{url}}api"
+							],
+							"path": [
+								"SQLite",
+								"DeleteOrders"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"requests": {},
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"requests": {},
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "urls",
+			"value": ""
+		},
+		{
+			"key": "url",
+			"value": ""
+		}
+	]
+}
