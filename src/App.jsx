@@ -4,6 +4,7 @@ const tabs = [
   { key: 'orders', label: 'Orders', icon: '📦' },
   { key: 'bot', label: 'Bot', icon: '🤖' },
   { key: 'settings', label: 'Setting', icon: '⚙️' },
+  { key: 'calculate', label: 'Calculate', icon: '🧮', link: 'https://nateeron.github.io/Calculate-Grid-App/', external: true },
 ]
 
 const TradingViewWidget = () => {
@@ -448,6 +449,12 @@ export default function App() {
                     </span>
                   </div>
                   <div className="order-card__row">
+                    <span className="label">Wait Sell Price</span>
+                    <span className="value">
+                      {order?.priceWaitSell != null ? Number(order.priceWaitSell).toFixed(4) : '-'}
+                    </span>
+                  </div>
+                  <div className="order-card__row">
                     <span className="label">Profit/Loss</span>
                     <span className={`value ${isGain ? 'positive' : 'negative'}`}>
                       {isGain ? '+' : ''}
@@ -883,16 +890,32 @@ export default function App() {
       )}
 
       <nav className="bottom-nav">
-        {tabs.map((tab) => (
-          <button
-            key={tab.key}
-            className={tab.key === activeTab ? 'nav-item active' : 'nav-item'}
-            onClick={() => setActiveTab(tab.key)}
-          >
-            <span className="icon">{tab.icon}</span>
-            <span>{tab.label}</span>
-          </button>
-        ))}
+        {tabs.map((tab) => {
+          if (tab.external && tab.link) {
+            return (
+              <a
+                key={tab.key}
+                href={tab.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="nav-item"
+              >
+                <span className="icon">{tab.icon}</span>
+                <span>{tab.label}</span>
+              </a>
+            )
+          }
+          return (
+            <button
+              key={tab.key}
+              className={tab.key === activeTab ? 'nav-item active' : 'nav-item'}
+              onClick={() => setActiveTab(tab.key)}
+            >
+              <span className="icon">{tab.icon}</span>
+              <span>{tab.label}</span>
+            </button>
+          )
+        })}
       </nav>
     </div>
   )

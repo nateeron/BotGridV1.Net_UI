@@ -187,8 +187,8 @@ button:not(:disabled):hover {
 }
 
 .danger {
-  background: linear-gradient(120deg, rgba(255, 107, 143, 0.9), rgba(255, 138, 166, 0.85));
-  border-color: rgba(255, 107, 143, 0.45);
+  background: #1e1010;
+  border-color: rgb(164 88 107 / 45%);
   color: #fff;
   box-shadow: 0 6px 14px rgba(255, 107, 143, 0.28);
 }
@@ -667,6 +667,9 @@ button:not(:disabled):hover {
   padding: 8px;
   background: transparent;
   color: var(--text-muted);
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
 }
 
 .nav-item .icon {
