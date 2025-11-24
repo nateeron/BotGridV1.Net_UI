@@ -1,16 +1,21 @@
 :root {
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  color: #f6f7fb;
-  --theme-bg: rgb(38 37 37);
-  --surface: #2f2d2d;
-  --surface-alt: #3a3737;
-  --border: rgba(255, 255, 255, 0.1);
-  --text-muted: #cfd3da;
-  --accent: #3be2ff;
-  --accent-strong: #14bffc;
-  --accent-soft: rgba(59, 226, 255, 0.15);
-  --danger: #ff7288;
-  --danger-soft: rgba(255, 114, 136, 0.16);
+  color: #eaf2ff;
+  --theme-bg: #04070d;
+  --theme-bg-alt: #080e18;
+  --surface: #0d1524;
+  --surface-alt: #131d32;
+  --glass: rgba(28, 44, 81, 0.4);
+  --border: rgba(99, 160, 255, 0.18);
+  --border-strong: rgba(99, 160, 255, 0.35);
+  --text-muted: #99a8c7;
+  --accent: #4da6ff;
+  --accent-strong: #74d1ff;
+  --accent-soft: rgba(77, 166, 255, 0.18);
+  --danger: #ff6b8f;
+  --danger-soft: rgba(255, 107, 143, 0.18);
+  --positive: #5cf3c5;
+  --negative: #ff7a99;
   --radius: 3px;
   background-color: var(--theme-bg);
 }
@@ -22,8 +27,8 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--theme-bg);
-  color: #f6f7fb;
+  background: radial-gradient(circle at 20% 20%, #111d2f 0%, #05070f 55%);
+  color: #eaf2ff;
 }
 
 .app {
@@ -31,8 +36,8 @@ body {
   flex-direction: column;
   min-height: 100vh;
   padding-bottom: 64px;
-  background: var(--theme-bg);
-  color: #f6f7fb;
+  background: linear-gradient(180deg, rgba(4, 7, 13, 0.9), rgba(2, 3, 6, 0.95));
+  color: #eaf2ff;
 }
 
 .app-header {
@@ -40,7 +45,7 @@ body {
   top: 0;
   z-index: 2;
   padding: 20px clamp(16px, 4vw, 32px);
-  background: linear-gradient(180deg, var(--surface-alt), rgba(47, 45, 45, 0.8));
+  background: linear-gradient(180deg, rgba(5, 11, 21, 0.95), rgba(4, 6, 12, 0.9));
   backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--border);
 }
@@ -82,16 +87,16 @@ h4 {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  background: var(--theme-bg);
+  background: transparent;
 }
 
 .card {
-  background: var(--surface);
+  background: linear-gradient(145deg, rgba(16, 25, 42, 0.92), rgba(9, 13, 23, 0.95));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 20px;
-  backdrop-filter: blur(12px);
-  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 20px 40px rgba(5, 8, 16, 0.65);
 }
 
 .card header {
@@ -118,8 +123,8 @@ input,
 select {
   border-radius: var(--radius);
   border: 1px solid var(--border);
-  background: var(--surface-alt);
-  color: #f6f7fb;
+  background: rgba(6, 10, 18, 0.8);
+  color: #eaf2ff;
   padding: 12px;
   font-size: 15px;
   transition: border 0.2s ease, box-shadow 0.2s ease;
@@ -138,7 +143,7 @@ button {
   padding: 12px 16px;
   font-size: 15px;
   font-weight: 600;
-  color: #051721;
+  color: #021222;
   background: linear-gradient(120deg, var(--accent), var(--accent-strong));
   transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
   box-shadow: 0 8px 20px rgba(20, 191, 252, 0.25);
@@ -220,9 +225,9 @@ button:not(:disabled):hover {
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 8px;
   padding: 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: rgba(18, 26, 42, 0.85);
 }
 
 .setting-grid {
@@ -234,7 +239,7 @@ button:not(:disabled):hover {
 .setting-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface-alt);
+  background: linear-gradient(160deg, rgba(15, 22, 37, 0.95), rgba(11, 16, 27, 0.9));
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -245,7 +250,7 @@ button:not(:disabled):hover {
 
 .setting-card.active {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(59, 226, 255, 0.3);
+  box-shadow: 0 0 0 1px rgba(59, 226, 255, 0.45), 0 10px 25px rgba(4, 9, 18, 0.9);
 }
 
 .setting-card__header {
@@ -263,7 +268,7 @@ button:not(:disabled):hover {
   font-size: 18px;
   font-weight: 600;
   margin: 0;
-  color: #f6f7fb;
+  color: #f7fbff;
 }
 
 .setting-card__id {
@@ -285,7 +290,7 @@ button:not(:disabled):hover {
 
 .setting-card .value {
   font-weight: 600;
-  color: #f6f7fb;
+  color: #f7fbff;
 }
 
 .modal-info-grid {
@@ -321,7 +326,7 @@ button:not(:disabled):hover {
 .bot-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface-alt);
+  background: linear-gradient(150deg, rgba(17, 24, 40, 0.95), rgba(10, 16, 27, 0.85));
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -355,7 +360,7 @@ button:not(:disabled):hover {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 8px;
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(7, 11, 19, 0.6);
 }
 
 .bot-card__message p {
@@ -381,7 +386,7 @@ button:not(:disabled):hover {
   margin-left: calc(50% - 50vw);
   margin-right: calc(50% - 50vw);
   margin-bottom: 16px;
-  background: #0f0f0f;
+  background: #05070f;
 }
 
 .tradingview-widget-copyright {
@@ -415,13 +420,13 @@ button:not(:disabled):hover {
 }
 
 .status-chip.status-running {
-  background: rgba(60, 209, 123, 0.2);
-  color: #63ffb1;
+  background: rgba(92, 243, 197, 0.2);
+  color: var(--positive);
 }
 
 .status-chip.status-stopped {
-  background: rgba(255, 187, 85, 0.2);
-  color: #ffdf9d;
+  background: rgba(255, 187, 120, 0.18);
+  color: #ffdba0;
 }
 
 .status-chip.status-unknown {
@@ -439,7 +444,7 @@ button:not(:disabled):hover {
   padding: 12px 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: rgba(12, 18, 32, 0.85);
   color: var(--text-muted);
   font-size: 14px;
 }
@@ -462,7 +467,7 @@ button:not(:disabled):hover {
 .order-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface-alt);
+  background: linear-gradient(160deg, rgba(16, 23, 39, 0.92), rgba(9, 13, 22, 0.9));
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -518,11 +523,11 @@ button:not(:disabled):hover {
 }
 
 .order-card .value.positive {
-  color: #3cd17b;
+  color: var(--positive);
 }
 
 .order-card .value.negative {
-  color: #ff6f82;
+  color: var(--negative);
 }
 
 .status-badge {
@@ -640,7 +645,7 @@ button:not(:disabled):hover {
   right: 0;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-  background: var(--surface-alt);
+  background: rgba(6, 10, 18, 0.95);
   border-top: 1px solid var(--border);
   backdrop-filter: blur(18px);
   padding: 8px 4px;

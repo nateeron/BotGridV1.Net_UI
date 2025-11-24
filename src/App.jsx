@@ -50,12 +50,7 @@ const TradingViewWidget = () => {
   return (
     <div className="tradingview-widget-container">
       <div className="tradingview-widget-container__widget" ref={containerRef}></div>
-      <div className="tradingview-widget-copyright">
-        <a href="https://www.tradingview.com/symbols/XRPUSDT/?exchange=BINANCE" rel="noopener noreferrer" target="_blank">
-          <span className="blue-text">XRPUSDT price</span>
-        </a>
-        <span className="trademark"> by TradingView</span>
-      </div>
+     
     </div>
   )
 }
@@ -74,8 +69,8 @@ const buildUrl = (base, endpoint) => {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('orders')
-  //const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
-  const [apiBase, setApiBase] = useState('http://localhost:5081/api')
+  const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
+  //const [apiBase, setApiBase] = useState('http://localhost:5081/api')
   const [loadingKey, setLoadingKey] = useState(null)
   const [orders, setOrders] = useState([])
   const [ordersLoading, setOrdersLoading] = useState(false)
