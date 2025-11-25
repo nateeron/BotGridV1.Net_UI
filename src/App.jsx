@@ -3,6 +3,8 @@ import * as signalR from '@microsoft/signalr'
 
 const tabs = [
   { key: 'orders', label: 'Orders', icon: '📦' },
+  { key: 'report', label: 'Report', icon: '📊' },
+  { key: 'binaceOrders', label: 'Binace Order', icon: '📋' },
   { key: 'bot', label: 'Bot', icon: '🤖' },
   { key: 'settings', label: 'Setting', icon: '⚙️' },
   { key: 'calculate', label: 'Calculate', icon: '🧮', link: 'https://nateeron.github.io/Calculate-Grid-App/', external: true },
@@ -90,10 +92,70 @@ export default function App() {
   const [orderModalData, setOrderModalData] = useState(null)
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
   const [sellModalData, setSellModalData] = useState(null)
-  const [showChart, setShowChart] = useState(true)
+  const [viewMode, setViewMode] = useState('chart') // 'chart', 'calculate', 'trade'
   const [cal1, setCal1] = useState('')
   const [cal2, setCal2] = useState('')
   const [percentInput, setPercentInput] = useState('')
+  const [tradeForm, setTradeForm] = useState({
+    ConfigId: 1,
+    Symbol: 'BTCUSDT',
+    Side: 'BUY',
+    OrderType: 'MARKET',
+    Price: '',
+    CoinQuantity: '',
+    UsdAmount: '',
+    PortfolioPercent: '',
+    TimeInForce: 'GTC',
+  })
+  const [tradeLoading, setTradeLoading] = useState(false)
+  const [isTradeVerificationOpen, setIsTradeVerificationOpen] = useState(false)
+  const [verificationKey, setVerificationKey] = useState('')
+  const [verificationInput, setVerificationInput] = useState('')
+  const [pendingTradePayload, setPendingTradePayload] = useState(null)
+  const [isSellNowVerificationOpen, setIsSellNowVerificationOpen] = useState(false)
+  const [sellNowVerificationKey, setSellNowVerificationKey] = useState('')
+  const [sellNowVerificationInput, setSellNowVerificationInput] = useState('')
+  const [pendingSellNowOrder, setPendingSellNowOrder] = useState(null)
+  const [sellNowLoading, setSellNowLoading] = useState(false)
+  const [isBuyNowVerificationOpen, setIsBuyNowVerificationOpen] = useState(false)
+  const [isBuyNowFormOpen, setIsBuyNowFormOpen] = useState(false)
+  const [buyNowVerificationKey, setBuyNowVerificationKey] = useState('')
+  const [buyNowVerificationInput, setBuyNowVerificationInput] = useState('')
+  const [buyNowForm, setBuyNowForm] = useState({
+    ConfigId: 1,
+    BuyAmountUSD: '',
+    Symbol: '',
+  })
+  const [buyNowLoading, setBuyNowLoading] = useState(false)
+  const [spotReport, setSpotReport] = useState(null)
+  const [spotReportLoading, setSpotReportLoading] = useState(false)
+  const [spotReportError, setSpotReportError] = useState(null)
+  const [reportConfigId, setReportConfigId] = useState(null)
+  const [reportPeriod, setReportPeriod] = useState('1M')
+  const [allCoinsData, setAllCoinsData] = useState({
+    coins: [],
+    totalValueUSD: 0,
+    count: 0,
+  })
+  const [allCoinsLoading, setAllCoinsLoading] = useState(false)
+  const [allCoinsError, setAllCoinsError] = useState(null)
+  const [filledOrders, setFilledOrders] = useState([])
+  const [filledOrdersSort, setFilledOrdersSort] = useState({
+    field: 'orderId',
+    direction: 'desc',
+  })
+  const [filledOrdersLoading, setFilledOrdersLoading] = useState(false)
+  const [filledOrdersError, setFilledOrdersError] = useState(null)
+  const [filledOrdersForm, setFilledOrdersForm] = useState({
+    ConfigId: 1,
+    Symbol: '',
+    OrderSide: '',
+    StartTime: '',
+    Limit: 50,
+  })
+  const [serverTimeData, setServerTimeData] = useState(null)
+  const [serverTimeLoading, setServerTimeLoading] = useState(false)
+  const [serverTimeError, setServerTimeError] = useState(null)
   const [alerts, setAlerts] = useState([])
   const [alertLogs, setAlertLogs] = useState([])
   const [alertLogsLoading, setAlertLogsLoading] = useState(false)
@@ -200,7 +262,9 @@ export default function App() {
           setSettings(items)
           if (!selectedSettingId && items.length > 0) {
             setSelectedSettingId(items[0].id)
-            setReportPayload((prev) => ({ ...prev, ConfigId: items[0].id }))
+          }
+          if (!reportConfigId && items.length > 0) {
+            setReportConfigId(items[0].id)
           }
         },
         onError: (err) => {
@@ -313,6 +377,121 @@ export default function App() {
     })
   }
 
+  const fetchSpotReport = async () => {
+    if (!reportConfigId) return
+    setSpotReportLoading(true)
+    setSpotReportError(null)
+    try {
+      await runRequest('spotReport', 'Binace/GetSpotReport', {
+        payload: {
+          ConfigId: reportConfigId,
+          Period: reportPeriod,
+        },
+        onSuccess: (data) => {
+          setSpotReport(data)
+        },
+        onError: (err) => {
+          setSpotReportError(err)
+        },
+      })
+    } finally {
+      setSpotReportLoading(false)
+    }
+  }
+
+  const fetchAllCoins = async () => {
+    if (!reportConfigId) return
+    setAllCoinsLoading(true)
+    setAllCoinsError(null)
+    try {
+      await runRequest('allCoins', 'Binace/GetAllCoins', {
+        payload: { ConfigId: reportConfigId },
+        onSuccess: (data) => {
+          setAllCoinsData({
+            coins: data?.coins || [],
+            totalValueUSD: data?.totalValueUSD || 0,
+            count: data?.count || 0,
+          })
+        },
+        onError: (err) => {
+          setAllCoinsError(err)
+        },
+      })
+    } finally {
+      setAllCoinsLoading(false)
+    }
+  }
+
+  const fetchFilledOrders = async () => {
+    setFilledOrdersLoading(true)
+    setFilledOrdersError(null)
+    try {
+      const payload = {
+        ConfigId: Number(filledOrdersForm.ConfigId),
+        Limit: Number(filledOrdersForm.Limit) || 50,
+      }
+      if (filledOrdersForm.Symbol) payload.Symbol = filledOrdersForm.Symbol.toUpperCase()
+      if (filledOrdersForm.OrderSide) payload.OrderSide = filledOrdersForm.OrderSide
+      if (filledOrdersForm.StartTime) {
+        // Convert datetime-local to ISO format
+        const date = new Date(filledOrdersForm.StartTime)
+        payload.StartTime = date.toISOString()
+      }
+
+      await runRequest('filledOrders', 'Binace/GetFilledOrders', {
+        payload,
+        onSuccess: (data) => {
+          const items = data?.orders || []
+          setFilledOrders(sortFilledOrders(items, filledOrdersSort.field, filledOrdersSort.direction))
+        },
+        onError: (err) => {
+          setFilledOrdersError(err)
+        },
+      })
+    } finally {
+      setFilledOrdersLoading(false)
+    }
+  }
+
+  const fetchServerTime = async () => {
+    if (!selectedSettingId) {
+      alert('กรุณาเลือก Setting ก่อน')
+      return
+    }
+    setServerTimeLoading(true)
+    setServerTimeError(null)
+    try {
+      await runRequest('serverTime', 'Binace/GetServerTime', {
+        payload: { ConfigId: selectedSettingId },
+        onSuccess: (data) => {
+          setServerTimeData(data)
+        },
+        onError: (err) => {
+          setServerTimeError(err)
+        },
+      })
+    } finally {
+      setServerTimeLoading(false)
+    }
+  }
+ 
+  const sortFilledOrders = (items, field, direction) => {
+    const sorted = [...items].sort((a, b) => {
+      const valueA = a[field]
+      const valueB = b[field]
+      if (valueA === undefined || valueA === null) return 1
+      if (valueB === undefined || valueB === null) return -1
+      if (typeof valueA === 'number' && typeof valueB === 'number') {
+        return valueA - valueB
+      }
+      if (field.toLowerCase().includes('time')) {
+        return new Date(valueA) - new Date(valueB)
+      }
+      return String(valueA).localeCompare(String(valueB))
+    })
+    return direction === 'asc' ? sorted : sorted.reverse()
+  }
+
   useEffect(() => {
     fetchOrders()
     fetchSettings()
@@ -326,6 +505,22 @@ export default function App() {
 
     return () => clearInterval(unreadInterval)
   }, [])
+
+  useEffect(() => {
+    if (!reportConfigId) return
+    fetchAllCoins()
+  }, [reportConfigId])
+
+  useEffect(() => {
+    if (!reportConfigId) return
+    fetchSpotReport()
+  }, [reportConfigId, reportPeriod])
+
+  useEffect(() => {
+    if (activeTab === 'binaceOrders') {
+      fetchFilledOrders()
+    }
+  }, [activeTab])
 
   // SignalR connection for real-time order updates
   useEffect(() => {
@@ -524,11 +719,158 @@ export default function App() {
   }
 
   const openSellModal = (order) => {
-    setSellModalData(order || null)
+    if (!order?.id) return
+    
+    // Generate verification key and show modal
+    const key = generateVerificationKey()
+    setSellNowVerificationKey(key)
+    setSellNowVerificationInput('')
+    setPendingSellNowOrder(order)
+    setIsSellNowVerificationOpen(true)
   }
 
   const closeSellModal = () => {
     setSellModalData(null)
+    setIsSellNowVerificationOpen(false)
+    setSellNowVerificationInput('')
+    setSellNowVerificationKey('')
+    setPendingSellNowOrder(null)
+  }
+
+  const confirmSellNow = async () => {
+    if (!pendingSellNowOrder) return
+
+    if (sellNowVerificationInput !== sellNowVerificationKey) {
+      alert('รหัสยืนยันไม่ถูกต้อง กรุณาลองอีกครั้ง')
+      setSellNowVerificationInput('')
+      return
+    }
+
+    setIsSellNowVerificationOpen(false)
+    setSellNowLoading(true)
+    try {
+      const payload = {
+        OrderId: Number(pendingSellNowOrder.id),
+      }
+
+      // Add ConfigId if available
+      if (pendingSellNowOrder.setting_ID || pendingSellNowOrder.settingId || pendingSellNowOrder.settingID) {
+        payload.ConfigId = Number(
+          pendingSellNowOrder.setting_ID || pendingSellNowOrder.settingId || pendingSellNowOrder.settingID
+        )
+      }
+
+      await runRequest(`sellNow-${pendingSellNowOrder.id}`, 'BotWorker/SellNow', {
+        payload,
+        onSuccess: (data) => {
+          alert('Sell Now executed successfully!')
+          // Reload orders to see the updated order
+          fetchOrders()
+          closeSellModal()
+        },
+        onError: (err) => {
+          alert(`Sell Now failed: ${err.message || JSON.stringify(err)}`)
+        },
+      })
+    } catch (err) {
+      console.error('Sell Now error:', err)
+      alert(`Sell Now failed: ${err.message}`)
+    } finally {
+      setSellNowLoading(false)
+      setPendingSellNowOrder(null)
+      setSellNowVerificationKey('')
+      setSellNowVerificationInput('')
+    }
+  }
+
+  const openBuyNowForm = () => {
+    // Set default ConfigId from selectedSettingId if available
+    if (selectedSettingId) {
+      setBuyNowForm((prev) => ({ ...prev, ConfigId: selectedSettingId }))
+    }
+    setIsBuyNowFormOpen(true)
+  }
+
+  const executeBuyNow = () => {
+    if (!buyNowForm.ConfigId) {
+      alert('กรุณาเลือก Config ID')
+      return
+    }
+
+    // Close form modal and show verification modal
+    setIsBuyNowFormOpen(false)
+    
+    // Generate verification key and show modal
+    const key = generateVerificationKey()
+    setBuyNowVerificationKey(key)
+    setBuyNowVerificationInput('')
+    setIsBuyNowVerificationOpen(true)
+  }
+
+  const closeBuyNowForm = () => {
+    setIsBuyNowFormOpen(false)
+  }
+
+  const confirmBuyNow = async () => {
+    if (buyNowVerificationInput !== buyNowVerificationKey) {
+      alert('รหัสยืนยันไม่ถูกต้อง กรุณาลองอีกครั้ง')
+      setBuyNowVerificationInput('')
+      return
+    }
+
+    setIsBuyNowVerificationOpen(false)
+    setBuyNowLoading(true)
+    try {
+      const payload = {
+        ConfigId: Number(buyNowForm.ConfigId),
+      }
+
+      // Add optional fields only if they have values
+      if (buyNowForm.BuyAmountUSD) {
+        payload.BuyAmountUSD = Number(buyNowForm.BuyAmountUSD)
+      }
+      if (buyNowForm.Symbol) {
+        payload.Symbol = buyNowForm.Symbol.toUpperCase()
+      }
+
+      await runRequest('buyNow', 'BotWorker/BuyNow', {
+        payload,
+        onSuccess: (data) => {
+          alert('Buy Now executed successfully!')
+          // Reload orders to see the new order
+          fetchOrders()
+          // Reset form
+          setBuyNowForm({
+            ConfigId: 1,
+            BuyAmountUSD: '',
+            Symbol: '',
+          })
+        },
+        onError: (err) => {
+          alert(`Buy Now failed: ${err.message || JSON.stringify(err)}`)
+        },
+      })
+    } catch (err) {
+      console.error('Buy Now error:', err)
+      alert(`Buy Now failed: ${err.message}`)
+    } finally {
+      setBuyNowLoading(false)
+      setBuyNowVerificationKey('')
+      setBuyNowVerificationInput('')
+    }
+  }
+
+  const closeBuyNowVerification = () => {
+    setIsBuyNowVerificationOpen(false)
+    setBuyNowVerificationInput('')
+    setBuyNowVerificationKey('')
+  }
+
+  const handleFilledOrdersSort = (field) => {
+    const direction =
+      filledOrdersSort.field === field && filledOrdersSort.direction === 'asc' ? 'desc' : 'asc'
+    setFilledOrdersSort({ field, direction })
+    setFilledOrders(sortFilledOrders(filledOrders, field, direction))
   }
 
   useEffect(() => {
@@ -708,6 +1050,107 @@ export default function App() {
     }
   }
 
+  const generateVerificationKey = () => {
+    // Generate random 4-digit number
+    return Math.floor(1000 + Math.random() * 9000).toString()
+  }
+
+  const executeTrade = async () => {
+    if (!tradeForm.Symbol || !tradeForm.Side || !tradeForm.OrderType) {
+      alert('กรุณากรอกข้อมูลให้ครบถ้วน')
+      return
+    }
+
+    // Validate that at least one quantity field is provided
+    const hasQuantity =
+      tradeForm.CoinQuantity || tradeForm.UsdAmount || tradeForm.PortfolioPercent
+    if (!hasQuantity) {
+      alert('กรุณาระบุจำนวน: CoinQuantity, UsdAmount หรือ PortfolioPercent')
+      return
+    }
+
+    // Validate Price for LIMIT orders
+    if (tradeForm.OrderType === 'LIMIT' && !tradeForm.Price) {
+      alert('กรุณาระบุราคาสำหรับ LIMIT order')
+      return
+    }
+
+    // Build payload - only include fields that have values
+    const payload = {
+      ConfigId: tradeForm.ConfigId || null,
+      Symbol: tradeForm.Symbol,
+      Side: tradeForm.Side,
+      OrderType: tradeForm.OrderType,
+    }
+
+    // Add optional fields only if they have values
+    if (tradeForm.Price) payload.Price = Number(tradeForm.Price)
+    if (tradeForm.CoinQuantity) payload.CoinQuantity = Number(tradeForm.CoinQuantity)
+    if (tradeForm.UsdAmount) payload.UsdAmount = Number(tradeForm.UsdAmount)
+    if (tradeForm.PortfolioPercent) payload.PortfolioPercent = Number(tradeForm.PortfolioPercent)
+    if (tradeForm.OrderType === 'LIMIT' && tradeForm.TimeInForce) {
+      payload.TimeInForce = tradeForm.TimeInForce
+    }
+
+    // Generate verification key and show modal
+    const key = generateVerificationKey()
+    setVerificationKey(key)
+    setVerificationInput('')
+    setPendingTradePayload(payload)
+    setIsTradeVerificationOpen(true)
+  }
+
+  const confirmTrade = async () => {
+    if (verificationInput !== verificationKey) {
+      alert('รหัสยืนยันไม่ถูกต้อง กรุณาลองอีกครั้ง')
+      setVerificationInput('')
+      return
+    }
+
+    setIsTradeVerificationOpen(false)
+    setTradeLoading(true)
+    try {
+      await runRequest('trade', 'Binace/Trade', {
+        payload: pendingTradePayload,
+        onSuccess: (data) => {
+          alert('Trade executed successfully!')
+          // Reload orders to see the new trade
+          fetchOrders()
+          // Reset form
+          setTradeForm({
+            ConfigId: 1,
+            Symbol: 'BTCUSDT',
+            Side: 'BUY',
+            OrderType: 'MARKET',
+            Price: '',
+            CoinQuantity: '',
+            UsdAmount: '',
+            PortfolioPercent: '',
+            TimeInForce: 'GTC',
+          })
+        },
+        onError: (err) => {
+          alert(`Trade failed: ${err.message || JSON.stringify(err)}`)
+        },
+      })
+    } catch (err) {
+      console.error('Trade error:', err)
+      alert(`Trade failed: ${err.message}`)
+    } finally {
+      setTradeLoading(false)
+      setPendingTradePayload(null)
+      setVerificationKey('')
+      setVerificationInput('')
+    }
+  }
+
+  const closeTradeVerification = () => {
+    setIsTradeVerificationOpen(false)
+    setVerificationInput('')
+    setVerificationKey('')
+    setPendingTradePayload(null)
+  }
+
   // Calculate functions
   const calculateSum1 = () => {
     const num1 = Number(cal1)
@@ -827,6 +1270,144 @@ export default function App() {
           <span className="result-label">Sum 4 - % of Cal1 = ?</span>
           <span className="result-value">{calculateSum4()}</span>
         </div>
+      </div>
+    </section>
+  )
+
+  const renderTrade = () => (
+    <section className="card">
+      <header>
+        <div>
+          <p className="eyebrow">Binance Trade</p>
+          <h3>Execute Trade Order</h3>
+        </div>
+      </header>
+
+      <div className="trade-form">
+        <div className="form-grid">
+          <label>
+            Config ID
+            <input
+              type="number"
+              value={tradeForm.ConfigId || ''}
+              onChange={(e) => setTradeForm((prev) => ({ ...prev, ConfigId: Number(e.target.value) || null }))}
+              placeholder="1"
+            />
+          </label>
+          <label>
+            Symbol
+            <input
+              type="text"
+              value={tradeForm.Symbol}
+              onChange={(e) => setTradeForm((prev) => ({ ...prev, Symbol: e.target.value.toUpperCase() }))}
+              placeholder="BTCUSDT"
+            />
+          </label>
+        </div>
+
+        <div className="form-grid">
+          <label>
+            Side
+            <select
+              value={tradeForm.Side}
+              onChange={(e) => setTradeForm((prev) => ({ ...prev, Side: e.target.value }))}
+            >
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+            </select>
+          </label>
+          <label>
+            Order Type
+            <select
+              value={tradeForm.OrderType}
+              onChange={(e) => setTradeForm((prev) => ({ ...prev, OrderType: e.target.value }))}
+            >
+              <option value="MARKET">MARKET</option>
+              <option value="LIMIT">LIMIT</option>
+            </select>
+          </label>
+        </div>
+
+        {tradeForm.OrderType === 'LIMIT' && (
+          <div className="form-grid">
+            <label>
+              Price
+              <input
+                type="number"
+                step="0.0001"
+                value={tradeForm.Price}
+                onChange={(e) => setTradeForm((prev) => ({ ...prev, Price: e.target.value }))}
+                placeholder="Required for LIMIT"
+              />
+            </label>
+            <label>
+              Time In Force
+              <select
+                value={tradeForm.TimeInForce}
+                onChange={(e) => setTradeForm((prev) => ({ ...prev, TimeInForce: e.target.value }))}
+              >
+                <option value="GTC">GTC (Good Till Cancel)</option>
+                <option value="IOC">IOC (Immediate Or Cancel)</option>
+                <option value="FOK">FOK (Fill Or Kill)</option>
+              </select>
+            </label>
+          </div>
+        )}
+
+        <div className="trade-quantity-section">
+          <p className="trade-section-title">Quantity (เลือกอย่างใดอย่างหนึ่ง)</p>
+          <div className="form-grid">
+            <label>
+              Coin Quantity
+              <input
+                type="number"
+                step="0.0001"
+                value={tradeForm.CoinQuantity}
+                onChange={(e) => setTradeForm((prev) => ({ ...prev, CoinQuantity: e.target.value }))}
+                placeholder="e.g. 100"
+              />
+            </label>
+            <label>
+              USD Amount
+              <input
+                type="number"
+                step="0.01"
+                value={tradeForm.UsdAmount}
+                onChange={(e) => setTradeForm((prev) => ({ ...prev, UsdAmount: e.target.value }))}
+                placeholder="e.g. 100"
+              />
+            </label>
+            <label>
+              Portfolio Percent (%)
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                value={tradeForm.PortfolioPercent}
+                onChange={(e) => setTradeForm((prev) => ({ ...prev, PortfolioPercent: e.target.value }))}
+                placeholder="e.g. 10"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="trade-examples">
+          <p className="trade-section-title">Examples:</p>
+          <div className="example-item">
+            <strong>Market Buy:</strong> Symbol: BTCUSDT, Side: BUY, OrderType: MARKET, UsdAmount: 100
+          </div>
+          <div className="example-item">
+            <strong>Market Sell:</strong> Symbol: XRPUSDT, Side: SELL, OrderType: MARKET, CoinQuantity: 100
+          </div>
+          <div className="example-item">
+            <strong>Limit Buy:</strong> Symbol: ETHUSDT, Side: BUY, OrderType: LIMIT, Price: 2500, PortfolioPercent: 10
+          </div>
+        </div>
+
+        <button className="primary" onClick={executeTrade} disabled={tradeLoading}>
+          {tradeLoading ? 'Executing...' : '🚀 Execute Trade'}
+        </button>
       </div>
     </section>
   )
@@ -1298,8 +1879,38 @@ export default function App() {
             <button className="secondary ghost" onClick={() => fetchSettings('settingsManual')} disabled={settingsLoading}>
               {settingsLoading ? 'Loading...' : 'Refresh'}
             </button>
+            <button className="secondary" onClick={fetchServerTime} disabled={serverTimeLoading || !selectedSettingId}>
+              {serverTimeLoading ? 'Checking...' : 'Get Server Time'}
+            </button>
           </div>
         </header>
+        {serverTimeError && <div className="state-block error">โหลด Server time ไม่ได้: {prettify(serverTimeError)}</div>}
+        {serverTimeData && (
+          <div className="server-time-card">
+            <h4>Server Time</h4>
+            <div className="server-time-grid">
+              <div>
+                <span className="label">Server Time</span>
+                <span className="value">{formatDateTime(serverTimeData.serverTime)}</span>
+              </div>
+              <div>
+                <span className="label">Local Time</span>
+                <span className="value">{formatDateTime(serverTimeData.localTime)}</span>
+              </div>
+              <div>
+                <span className="label">Difference (ms)</span>
+                <span className="value">{serverTimeData.timeDifferenceMs}</span>
+              </div>
+              <div>
+                <span className="label">Status</span>
+                <span className={`value ${serverTimeData.isSynchronized ? 'positive' : 'negative'}`}>
+                  {serverTimeData.isSynchronized ? 'Synchronized' : 'Not synced'}
+                </span>
+              </div>
+            </div>
+            {serverTimeData.recommendation && <p className="server-time-note">{serverTimeData.recommendation}</p>}
+          </div>
+        )}
         {settingsError && <div className="state-block error">โหลด Setting ไม่ได้: {prettify(settingsError)}</div>}
         {settingsLoading && <div className="state-block">กำลังโหลด Setting...</div>}
         {!settingsLoading && settings.length === 0 && <div className="state-block empty">ยังไม่มี Setting</div>}
@@ -1360,6 +1971,249 @@ export default function App() {
       </section>
 
     </>
+  )
+
+  const renderReport = () => (
+    <section className="card">
+      <header>
+        <div>
+          <p className="eyebrow">Portfolio Overview</p>
+          <h3>Report & Coins</h3>
+        </div>
+        <div className="button-group">
+          <button className="secondary ghost" onClick={fetchSpotReport} disabled={spotReportLoading}>
+            {spotReportLoading ? 'Report...' : 'Refresh Report'}
+          </button>
+          <button className="secondary ghost" onClick={fetchAllCoins} disabled={allCoinsLoading}>
+            {allCoinsLoading ? 'Coins...' : 'Refresh Coins'}
+          </button>
+        </div>
+      </header>
+      <div className="form-grid">
+        <label>
+          Setting
+          <select
+            value={reportConfigId || ''}
+            onChange={(e) => setReportConfigId(Number(e.target.value) || null)}
+          >
+            {!reportConfigId && <option value="">เลือก Setting</option>}
+            {settings.map((setting) => (
+              <option key={setting.id} value={setting.id}>
+                #{setting.id} — {setting.symbol || setting.SYMBOL || 'N/A'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Period
+          <select value={reportPeriod} onChange={(e) => setReportPeriod(e.target.value)}>
+            <option value="1D">1D</option>
+            <option value="1W">1W</option>
+            <option value="1M">1M</option>
+            <option value="3Y">3Y</option>
+          </select>
+        </label>
+      </div>
+      {!settings.length && <div className="state-block empty">ยังไม่มี Setting สำหรับรายงาน</div>}
+
+      {spotReportError && <div className="state-block error">โหลด Report ไม่ได้: {prettify(spotReportError)}</div>}
+      {spotReportLoading && <div className="state-block">กำลังโหลด Report...</div>}
+      {!spotReportLoading && spotReport && (
+        <div className="report-content">
+          <div className="report-summary">
+            <div className="report-item highlight">
+              <span className="report-label">Portfolio Value</span>
+              <span className="report-value">{Number(spotReport.portfolioValue || 0).toFixed(4)}</span>
+            </div>
+            <div className="report-item">
+              <span className="report-label">Orders Success</span>
+              <span className="report-value">{spotReport.ordersSuccess || 0}</span>
+            </div>
+            <div className="report-item">
+              <span className="report-label">Orders Waiting</span>
+              <span className="report-value">{spotReport.ordersWaiting || 0}</span>
+            </div>
+            <div className="report-item">
+              <span className="report-label">Period</span>
+              <span className="report-value">{spotReport.period || '-'}</span>
+            </div>
+          </div>
+          {spotReport.additionalData && (
+            <div className="report-table">
+              <h4>Additional Data</h4>
+              <table className="data-table">
+                <tbody>
+                  {Object.entries(spotReport.additionalData).map(([key, value]) => (
+                    <tr key={key}>
+                      <td className="table-key">{key}</td>
+                      <td className="table-value">{String(value)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {allCoinsError && <div className="state-block error">โหลด Coins ไม่ได้: {prettify(allCoinsError)}</div>}
+      {allCoinsLoading && <div className="state-block">กำลังโหลด Coins...</div>}
+      {!allCoinsLoading && (
+        <div className="coins-content">
+          <div className="coins-summary">
+            <div className="summary-item">
+              <span className="summary-label">Total Value USD</span>
+              <span className="summary-value">{Number(allCoinsData.totalValueUSD || 0).toFixed(4)}</span>
+            </div>
+            <div className="summary-item">
+              <span className="summary-label">Count</span>
+              <span className="summary-value">{allCoinsData.count || allCoinsData.coins.length}</span>
+            </div>
+          </div>
+          {allCoinsData.coins.length > 0 ? (
+            <div className="coins-list">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Coin</th>
+                    <th>Quantity</th>
+                    <th>Latest Price</th>
+                    <th>Value in USDT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allCoinsData.coins.map((coin, index) => (
+                    <tr key={index}>
+                      <td className="table-key">{coin.coin}</td>
+                      <td className="table-value">{Number(coin.quantity || 0).toFixed(8)}</td>
+                      <td className="table-value">{Number(coin.latestPrice || 0).toFixed(4)}</td>
+                      <td className="table-value">{Number(coin.valueInUSDT || 0).toFixed(4)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="state-block empty">ยังไม่มีข้อมูล Coins</div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+
+  const renderBinaceOrders = () => (
+    <section className="card">
+      <header>
+        <div>
+          <p className="eyebrow">Binance Filled Orders</p>
+          <h3>Order History</h3>
+        </div>
+        <button className="secondary ghost" onClick={fetchFilledOrders} disabled={filledOrdersLoading}>
+          {filledOrdersLoading ? 'Loading...' : 'Refresh'}
+        </button>
+      </header>
+
+      <div className="filled-orders-filters">
+        <div className="form-grid">
+          <label>
+            Config ID
+            <input
+              type="number"
+              value={filledOrdersForm.ConfigId || ''}
+              onChange={(e) => setFilledOrdersForm((prev) => ({ ...prev, ConfigId: Number(e.target.value) || 1 }))}
+            />
+          </label>
+          <label>
+            Symbol (Optional)
+            <input
+              type="text"
+              value={filledOrdersForm.Symbol}
+              onChange={(e) => setFilledOrdersForm((prev) => ({ ...prev, Symbol: e.target.value.toUpperCase() }))}
+              placeholder="XRPUSDT"
+            />
+          </label>
+          <label>
+            Order Side (Optional)
+            <select
+              value={filledOrdersForm.OrderSide}
+              onChange={(e) => setFilledOrdersForm((prev) => ({ ...prev, OrderSide: e.target.value }))}
+            >
+              <option value="">All</option>
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+            </select>
+          </label>
+          <label>
+            Start Time (Optional)
+            <input
+              type="datetime-local"
+              value={filledOrdersForm.StartTime}
+              onChange={(e) => setFilledOrdersForm((prev) => ({ ...prev, StartTime: e.target.value }))}
+            />
+          </label>
+          <label>
+            Limit
+            <input
+              type="number"
+              value={filledOrdersForm.Limit || 50}
+              onChange={(e) => setFilledOrdersForm((prev) => ({ ...prev, Limit: Number(e.target.value) || 50 }))}
+              min="1"
+              max="100"
+            />
+          </label>
+        </div>
+      </div>
+
+      {filledOrdersError && <div className="state-block error">โหลด Orders ไม่ได้: {prettify(filledOrdersError)}</div>}
+      {filledOrdersLoading && <div className="state-block">กำลังโหลด Orders...</div>}
+      {!filledOrdersLoading && filledOrders.length > 0 && (
+        <div className="filled-orders-table">
+          <table className="data-table">
+            <thead>
+              <tr>
+                {[
+                  { key: 'orderId', label: 'Order ID' },
+                  { key: 'symbol', label: 'Symbol' },
+                  { key: 'side', label: 'Side' },
+                  { key: 'type', label: 'Type' },
+                  { key: 'quantity', label: 'Quantity' },
+                  { key: 'price', label: 'Price' },
+                  { key: 'quoteQuantity', label: 'Quote Qty' },
+                  { key: 'quantityFilled', label: 'Filled Qty' },
+                  { key: 'quoteQuantityFilled', label: 'Filled Quote' },
+                  { key: 'createTime', label: 'Create Time' },
+                  { key: 'status', label: 'Status' },
+                ].map((column) => (
+                  <th key={column.key} onClick={() => handleFilledOrdersSort(column.key)}>
+                    {column.label}
+                    {filledOrdersSort.field === column.key && (
+                      <span className="sort-indicator">{filledOrdersSort.direction === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filledOrders.map((order) => (
+                <tr key={order.orderId}>
+                  <td className="table-value mono">{order.orderId}</td>
+                  <td className="table-key">{order.symbol}</td>
+                  <td className="table-value">{order.side}</td>
+                  <td className="table-value">{order.type}</td>
+                  <td className="table-value">{Number(order.quantity || 0).toFixed(8)}</td>
+                  <td className="table-value">{Number(order.price || 0).toFixed(4)}</td>
+                  <td className="table-value">{Number(order.quoteQuantity || 0).toFixed(4)}</td>
+                  <td className="table-value">{Number(order.quantityFilled || 0).toFixed(8)}</td>
+                  <td className="table-value">{Number(order.quoteQuantityFilled || 0).toFixed(4)}</td>
+                  <td className="table-value">{formatDateTime(order.createTime)}</td>
+                  <td className="table-value">{order.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   )
 
   return (
@@ -1428,30 +2282,46 @@ export default function App() {
         {showAlertLogs && renderAlertLogs()}
         {activeTab === 'orders' && (
           <>
-            {showChart ? (
+            {viewMode === 'chart' && (
               <div className="tradingview-full-width">
                 <TradingViewWidget />
               </div>
-            ) : (
-              renderCalculate()
             )}
+            {viewMode === 'calculate' && renderCalculate()}
+            {viewMode === 'trade' && renderTrade()}
             <div className="chart-menu-bar">
               <button
-                className={showChart ? 'menu-btn active' : 'menu-btn'}
-                onClick={() => setShowChart(true)}
+                className={viewMode === 'chart' ? 'menu-btn active' : 'menu-btn'}
+                onClick={() => setViewMode('chart')}
               >
                 Chart
               </button>
               <button
-                className={!showChart ? 'menu-btn active' : 'menu-btn'}
-                onClick={() => setShowChart(false)}
+                className={viewMode === 'calculate' ? 'menu-btn active' : 'menu-btn'}
+                onClick={() => setViewMode('calculate')}
               >
                 Calculate
+              </button>
+              <button
+                className={viewMode === 'trade' ? 'menu-btn active' : 'menu-btn'}
+                onClick={() => setViewMode('trade')}
+              >
+                Trad
+              </button>
+              <button
+                className="menu-btn create-order-btn"
+                onClick={openBuyNowForm}
+                disabled={buyNowLoading}
+                title="Create Order"
+              >
+                ➕
               </button>
             </div>
           </>
         )}
         {activeTab === 'orders' && renderOrders()}
+        {activeTab === 'report' && renderReport()}
+        {activeTab === 'binaceOrders' && renderBinaceOrders()}
         {activeTab === 'bot' && (
           <>
             {renderBot()}
@@ -1638,20 +2508,268 @@ export default function App() {
         </div>
       )}
 
-      {sellModalData && (
+      {/* Sell Now Verification Modal */}
+      {isSellNowVerificationOpen && pendingSellNowOrder && (
         <div className="modal-backdrop" onClick={closeSellModal}>
+          <div className="modal trade-verification-modal" onClick={(e) => e.stopPropagation()}>
+            <header>
+              <h3>ยืนยันการขายทันที</h3>
+            </header>
+            <div className="verification-content">
+              <div className="verification-info">
+                <p>
+                  <strong>Order ID:</strong> #{pendingSellNowOrder.id}
+                </p>
+                <p>
+                  <strong>Symbol:</strong> {pendingSellNowOrder.symbol || '—'}
+                </p>
+                <p>
+                  <strong>Quantity:</strong> {pendingSellNowOrder.coinQuantity ?? pendingSellNowOrder.quantity ?? '—'}
+                </p>
+                <p>
+                  <strong>Buy Price:</strong> {pendingSellNowOrder.priceBuy ?? '—'}
+                </p>
+                <p>
+                  <strong>Wait Sell Price:</strong> {pendingSellNowOrder.priceWaitSell ?? '—'}
+                </p>
+                {pendingSellNowOrder.setting_ID && (
+                  <p>
+                    <strong>Config ID:</strong> {pendingSellNowOrder.setting_ID}
+                  </p>
+                )}
+              </div>
+              <div className="verification-key-section">
+                <p className="verification-instruction">
+                  กรุณากรอกรหัสยืนยันด้านล่างเพื่อดำเนินการขาย:
+                </p>
+                <div className="verification-key-display">
+                  <span className="verification-key-label">รหัสยืนยัน:</span>
+                  <span className="verification-key-value">{sellNowVerificationKey}</span>
+                </div>
+                <label>
+                  กรอกรหัสยืนยัน
+                  <input
+                    type="text"
+                    value={sellNowVerificationInput}
+                    onChange={(e) => setSellNowVerificationInput(e.target.value)}
+                    placeholder="กรอกรหัสยืนยัน"
+                    autoFocus
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter') {
+                        confirmSellNow()
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="button-group">
+              <button className="secondary ghost" type="button" onClick={closeSellModal}>
+                Cancel
+              </button>
+              <button
+                className="primary"
+                type="button"
+                onClick={confirmSellNow}
+                disabled={sellNowVerificationInput !== sellNowVerificationKey || sellNowLoading}
+              >
+                {sellNowLoading ? 'Processing...' : 'ยืนยันขาย'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Buy Now Form Modal */}
+      {isBuyNowFormOpen && (
+        <div className="modal-backdrop" onClick={closeBuyNowForm}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <header>
-              <h3>Sell Now #{sellModalData.id}</h3>
+              <h3>Create Order (Buy Now)</h3>
             </header>
-            <p>ฟังก์ชัน Sell Now ยังไม่มี API เชื่อมต่อในตอนนี้</p>
-            <p>
-              Order: <strong>{sellModalData.symbol}</strong> จำนวน {sellModalData.coinQuantity ?? sellModalData.quantity ?? '-'} ที่ราคา{' '}
-              {sellModalData.priceBuy ?? '-'}
-            </p>
+            <div className="form-grid">
+              <label>
+                Config ID *
+                <input
+                  type="number"
+                  value={buyNowForm.ConfigId || ''}
+                  onChange={(e) => setBuyNowForm((prev) => ({ ...prev, ConfigId: Number(e.target.value) || null }))}
+                  placeholder="1"
+                  required
+                />
+              </label>
+            </div>
+            <label>
+              Buy Amount USD (Optional - override config)
+              <input
+                type="number"
+                step="0.01"
+                value={buyNowForm.BuyAmountUSD}
+                onChange={(e) => setBuyNowForm((prev) => ({ ...prev, BuyAmountUSD: e.target.value }))}
+                placeholder="0.00"
+              />
+            </label>
+            <label>
+              Symbol (Optional - override config)
+              <input
+                type="text"
+                value={buyNowForm.Symbol}
+                onChange={(e) => setBuyNowForm((prev) => ({ ...prev, Symbol: e.target.value.toUpperCase() }))}
+                placeholder="XRPUSDT"
+              />
+            </label>
             <div className="button-group">
-              <button className="secondary" type="button" onClick={closeSellModal}>
-                ปิดหน้าต่าง
+              <button className="secondary ghost" type="button" onClick={closeBuyNowForm}>
+                Cancel
+              </button>
+              <button className="primary" type="button" onClick={executeBuyNow}>
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Buy Now Verification Modal */}
+      {isBuyNowVerificationOpen && (
+        <div className="modal-backdrop" onClick={closeBuyNowVerification}>
+          <div className="modal trade-verification-modal" onClick={(e) => e.stopPropagation()}>
+            <header>
+              <h3>ยืนยันการสร้าง Order</h3>
+            </header>
+            <div className="verification-content">
+              <div className="verification-info">
+                <p>
+                  <strong>Config ID:</strong> {buyNowForm.ConfigId}
+                </p>
+                {buyNowForm.BuyAmountUSD && (
+                  <p>
+                    <strong>Buy Amount USD:</strong> {buyNowForm.BuyAmountUSD}
+                  </p>
+                )}
+                {buyNowForm.Symbol && (
+                  <p>
+                    <strong>Symbol:</strong> {buyNowForm.Symbol}
+                  </p>
+                )}
+              </div>
+              <div className="verification-key-section">
+                <p className="verification-instruction">
+                  กรุณากรอกรหัสยืนยันด้านล่างเพื่อดำเนินการ:
+                </p>
+                <div className="verification-key-display">
+                  <span className="verification-key-label">รหัสยืนยัน:</span>
+                  <span className="verification-key-value">{buyNowVerificationKey}</span>
+                </div>
+                <label>
+                  กรอกรหัสยืนยัน
+                  <input
+                    type="text"
+                    value={buyNowVerificationInput}
+                    onChange={(e) => setBuyNowVerificationInput(e.target.value)}
+                    placeholder="กรอกรหัสยืนยัน"
+                    autoFocus
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter') {
+                        confirmBuyNow()
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="button-group">
+              <button className="secondary ghost" type="button" onClick={closeBuyNowVerification}>
+                Cancel
+              </button>
+              <button
+                className="primary"
+                type="button"
+                onClick={confirmBuyNow}
+                disabled={buyNowVerificationInput !== buyNowVerificationKey || buyNowLoading}
+              >
+                {buyNowLoading ? 'Processing...' : 'ยืนยัน'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Trade Verification Modal */}
+      {isTradeVerificationOpen && pendingTradePayload && (
+        <div className="modal-backdrop" onClick={closeTradeVerification}>
+          <div className="modal trade-verification-modal" onClick={(e) => e.stopPropagation()}>
+            <header>
+              <h3>ยืนยันการซื้อ/ขาย</h3>
+            </header>
+            <div className="verification-content">
+              <div className="verification-info">
+                <p>
+                  <strong>Symbol:</strong> {pendingTradePayload.Symbol}
+                </p>
+                <p>
+                  <strong>Side:</strong> {pendingTradePayload.Side}
+                </p>
+                <p>
+                  <strong>Order Type:</strong> {pendingTradePayload.OrderType}
+                </p>
+                {pendingTradePayload.Price && (
+                  <p>
+                    <strong>Price:</strong> {pendingTradePayload.Price}
+                  </p>
+                )}
+                {pendingTradePayload.UsdAmount && (
+                  <p>
+                    <strong>USD Amount:</strong> {pendingTradePayload.UsdAmount}
+                  </p>
+                )}
+                {pendingTradePayload.CoinQuantity && (
+                  <p>
+                    <strong>Coin Quantity:</strong> {pendingTradePayload.CoinQuantity}
+                  </p>
+                )}
+                {pendingTradePayload.PortfolioPercent && (
+                  <p>
+                    <strong>Portfolio Percent:</strong> {pendingTradePayload.PortfolioPercent}%
+                  </p>
+                )}
+              </div>
+              <div className="verification-key-section">
+                <p className="verification-instruction">
+                  กรุณากรอกรหัสยืนยันด้านล่างเพื่อดำเนินการ:
+                </p>
+                <div className="verification-key-display">
+                  <span className="verification-key-label">รหัสยืนยัน:</span>
+                  <span className="verification-key-value">{verificationKey}</span>
+                </div>
+                <label>
+                  กรอกรหัสยืนยัน
+                  <input
+                    type="text"
+                    value={verificationInput}
+                    onChange={(e) => setVerificationInput(e.target.value)}
+                    placeholder="กรอกรหัสยืนยัน"
+                    autoFocus
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter') {
+                        confirmTrade()
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="button-group">
+              <button className="secondary ghost" type="button" onClick={closeTradeVerification}>
+                Cancel
+              </button>
+              <button
+                className="primary"
+                type="button"
+                onClick={confirmTrade}
+                disabled={verificationInput !== verificationKey || tradeLoading}
+              >
+                {tradeLoading ? 'Processing...' : 'ยืนยัน'}
               </button>
             </div>
           </div>
