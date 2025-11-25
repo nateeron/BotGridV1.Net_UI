@@ -91,7 +91,7 @@ h4 {
 }
 
 .card {
-  background: linear-gradient(145deg, rgba(16, 25, 42, 0.92), rgba(9, 13, 23, 0.95));
+  background: linear-gradient(145deg, rgba(9, 14, 22, 0.92), rgba(9, 13, 23, 0.95));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 20px;
@@ -1084,8 +1084,8 @@ button:not(:disabled):hover {
 /* Top Right Controls */
 .top-right-controls {
   position: fixed;
-  top: 20px;
-  right: 20px;
+  bottom: 80px;
+  right: 5px;
   z-index: 1001;
   display: flex;
   gap: 8px;
@@ -1094,9 +1094,9 @@ button:not(:disabled):hover {
 
 .top-control-btn {
   position: relative;
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
+  width: 33px;
+  height: 33px;
+  border-radius: 3px;
   background: rgba(15, 15, 15, 0.95);
   border: 1px solid rgba(0, 209, 255, 0.3);
   color: #00d1ff;
@@ -1346,6 +1346,23 @@ button:not(:disabled):hover {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
+.info-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  background: rgba(0, 209, 255, 0.08);
+  border: 1px solid rgba(0, 209, 255, 0.2);
+  border-radius: 8px;
+  color: #8ea7ff;
+  font-size: 13px;
+}
+
+.info-pill strong {
+  color: #00d1ff;
+  font-weight: 600;
+}
+
 .server-time-card {
   margin-top: 16px;
   padding: 16px;
@@ -1421,13 +1438,31 @@ button:not(:disabled):hover {
   background: rgba(0, 209, 255, 0.05);
 }
 
+.order-row.buy {
+  background: rgba(0, 255, 153, 0.08);
+}
+
+.order-row.sell {
+  background: rgba(255, 94, 94, 0.08);
+}
+
+.table-value.side-buy {
+  color: #4dffb3;
+  font-weight: 600;
+}
+
+.table-value.side-sell {
+  color: #ff7a7a;
+  font-weight: 600;
+}
+
 .table-key {
   color: #8ea7ff;
   font-weight: 600;
 }
 
 .table-value {
-  color: #c2d3ff;
+  color: #edf0f7;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
 

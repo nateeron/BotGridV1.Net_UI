@@ -71,10 +71,18 @@ const buildUrl = (base, endpoint) => {
   return `${cleanBase}/${cleanEndpoint}`
 }
 
+const trimZeros = (value, decimals = 8) => {
+  if (value === null || value === undefined || value === '') return '-'
+  const num = Number(value)
+  if (Number.isNaN(num)) return value
+  const fixed = num.toFixed(decimals)
+  return fixed.replace(/\.?0+$/, '')
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('orders')
-  //const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
-  const [apiBase, setApiBase] = useState('http://localhost:5081/api')
+  const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
+  //const [apiBase, setApiBase] = useState('http://localhost:5081/api')
   const [loadingKey, setLoadingKey] = useState(null)
   const [orders, setOrders] = useState([])
   const [ordersLoading, setOrdersLoading] = useState(false)
@@ -147,7 +155,6 @@ export default function App() {
   const [filledOrdersLoading, setFilledOrdersLoading] = useState(false)
   const [filledOrdersError, setFilledOrdersError] = useState(null)
   const [filledOrdersForm, setFilledOrdersForm] = useState({
-    ConfigId: 1,
     Symbol: '',
     OrderSide: '',
     StartTime: '',
@@ -423,11 +430,15 @@ export default function App() {
   }
 
   const fetchFilledOrders = async () => {
+    if (!reportConfigId) {
+      alert('กรุณาเลือก Config ID ในแท็บ Report ก่อน')
+      return
+    }
     setFilledOrdersLoading(true)
     setFilledOrdersError(null)
     try {
       const payload = {
-        ConfigId: Number(filledOrdersForm.ConfigId),
+        ConfigId: Number(reportConfigId || 1),
         Limit: Number(filledOrdersForm.Limit) || 50,
       }
       if (filledOrdersForm.Symbol) payload.Symbol = filledOrdersForm.Symbol.toUpperCase()
@@ -1287,12 +1298,18 @@ export default function App() {
         <div className="form-grid">
           <label>
             Config ID
-            <input
-              type="number"
+            <select
               value={tradeForm.ConfigId || ''}
               onChange={(e) => setTradeForm((prev) => ({ ...prev, ConfigId: Number(e.target.value) || null }))}
-              placeholder="1"
-            />
+              disabled={settings.length === 0}
+            >
+              {settings.length === 0 && <option value="">No settings</option>}
+              {settings.map((setting) => (
+                <option key={setting.id} value={setting.id}>
+                  #{setting.id} — {setting.symbol || setting.SYMBOL || 'N/A'}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             Symbol
@@ -2114,15 +2131,11 @@ export default function App() {
       </header>
 
       <div className="filled-orders-filters">
+        {!reportConfigId && <div className="state-block">กรุณาเลือก Setting ในแท็บ Report เพื่อกำหนด Config ID</div>}
         <div className="form-grid">
-          <label>
-            Config ID
-            <input
-              type="number"
-              value={filledOrdersForm.ConfigId || ''}
-              onChange={(e) => setFilledOrdersForm((prev) => ({ ...prev, ConfigId: Number(e.target.value) || 1 }))}
-            />
-          </label>
+          <div className="info-pill">
+            ใช้ Config ID จาก Report: <strong>{reportConfigId || '-'}</strong>
+          </div>
           <label>
             Symbol (Optional)
             <input
@@ -2195,16 +2208,36 @@ export default function App() {
             </thead>
             <tbody>
               {filledOrders.map((order) => (
-                <tr key={order.orderId}>
+                <tr
+                  key={order.orderId}
+                  className={
+                    order.side?.toLowerCase() === 'buy'
+                      ? 'order-row buy'
+                      : order.side?.toLowerCase() === 'sell'
+                      ? 'order-row sell'
+                      : ''
+                  }
+                >
                   <td className="table-value mono">{order.orderId}</td>
                   <td className="table-key">{order.symbol}</td>
-                  <td className="table-value">{order.side}</td>
+                  <td
+                    className={
+                      order.side?.toLowerCase() === 'buy'
+                        ? 'table-value side-buy'
+                        : order.side?.toLowerCase() === 'sell'
+                        ? 'table-value side-sell'
+                        : 'table-value'
+                    }
+                  >
+                    {order.side}
+                  </td>
                   <td className="table-value">{order.type}</td>
-                  <td className="table-value">{Number(order.quantity || 0).toFixed(8)}</td>
-                  <td className="table-value">{Number(order.price || 0).toFixed(4)}</td>
-                  <td className="table-value">{Number(order.quoteQuantity || 0).toFixed(4)}</td>
-                  <td className="table-value">{Number(order.quantityFilled || 0).toFixed(8)}</td>
-                  <td className="table-value">{Number(order.quoteQuantityFilled || 0).toFixed(4)}</td>
+                  <td className="table-value">{trimZeros(order.quantity)}</td>
+                  <td className="table-value">{trimZeros(order.price)}</td>
+                  <td className="table-value">{trimZeros(order.quoteQuantity)}</td>
+                  <td className="table-value">{trimZeros(order.quantityFilled)}</td>
+                  <td className="table-value">{trimZeros(order.quoteQuantityFilled)}</td>
+                  <td className="table-value">{trimZeros(order.quoteQuantityFilled)}</td>
                   <td className="table-value">{formatDateTime(order.createTime)}</td>
                   <td className="table-value">{order.status}</td>
                 </tr>
