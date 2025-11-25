@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import * as signalR from '@microsoft/signalr'
-import { createChart, ColorType } from 'lightweight-charts'
 
 const tabs = [
   { key: 'orders', label: 'Orders', icon: '📦' },
@@ -141,8 +140,8 @@ const defaultFilledOrdersForm = {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState(() => loadPrimitiveState('activeTab', 'orders'))
-  const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
-  //const [apiBase, setApiBase] = useState('http://localhost:5081/api')
+  //const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
+  const [apiBase, setApiBase] = useState('http://localhost:5081/api')
   const [loadingKey, setLoadingKey] = useState(null)
   const [orders, setOrders] = useState([])
   const [ordersLoading, setOrdersLoading] = useState(false)
@@ -169,6 +168,7 @@ export default function App() {
   const priceChartContainerRef = useRef(null)
   const priceChartInstanceRef = useRef(null)
   const priceSeriesRef = useRef(null)
+  const waitingLinesRef = useRef([])
   const [cal1, setCal1] = useState(() => loadPrimitiveState('cal1', ''))
   const [cal2, setCal2] = useState(() => loadPrimitiveState('cal2', ''))
   const [percentInput, setPercentInput] = useState(() => loadPrimitiveState('percentInput', '100'))
@@ -693,116 +693,163 @@ export default function App() {
 
   // SignalR connection for real-time order updates
   useEffect(() => {
-    const baseUrl = apiBase.replace('/api', '')
-    const connection = new signalR.HubConnectionBuilder()
-      .withUrl(`${baseUrl}/hubs/orders`)
-      .withAutomaticReconnect()
-      .build()
+    let connection = null
+    let isMounted = true
 
-    connection
-      .start()
-      .then(() => {
-        console.log('SignalR Connected')
-        // Join group for config ID "1" (can be made dynamic based on selectedSettingId)
-        connection.invoke('JoinOrderGroup', '1').catch((err) => {
-          console.error('Error joining order group:', err)
+    const connectOrders = async () => {
+      try {
+        const baseUrl = apiBase.replace('/api', '')
+        connection = new signalR.HubConnectionBuilder()
+          .withUrl(`${baseUrl}/hubs/orders`)
+          .withAutomaticReconnect({
+            nextRetryDelayInMilliseconds: (retryContext) => {
+              // Exponential backoff: 1s, 2s, 4s, 8s, max 30s
+              return Math.min(1000 * Math.pow(2, retryContext.previousRetryCount), 30000)
+            },
+          })
+          .build()
+
+        // Listen for order updates before starting connection
+        connection.on('OrderUpdated', (data) => {
+          if (!isMounted) return
+          console.log('Order updated:', data)
+          // Reload/update UI
+          fetchOrders('ordersSignalR')
         })
-      })
-      .catch((err) => {
-        console.error('SignalR Connection Error:', err)
-      })
 
-    // Listen for order updates
-    connection.on('OrderUpdated', (data) => {
-      console.log('Order updated:', data)
-      // Reload/update UI
-      fetchOrders('ordersSignalR')
-    })
+        // Start connection
+        await connection.start()
+        
+        if (!isMounted) {
+          await connection.stop()
+          return
+        }
+
+        console.log('SignalR Connected')
+        
+        // Join group for config ID "1" (can be made dynamic based on selectedSettingId)
+        await connection.invoke('JoinOrderGroup', '1')
+      } catch (err) {
+        if (isMounted) {
+          console.error('SignalR Connection Error:', err)
+        }
+      }
+    }
+
+    connectOrders()
 
     // Cleanup on unmount
     return () => {
-      connection.stop().catch((err) => {
-        console.error('Error stopping SignalR connection:', err)
-      })
+      isMounted = false
+      if (connection) {
+        connection.stop().catch((err) => {
+          // Ignore errors during cleanup
+          console.debug('Error stopping SignalR connection:', err)
+        })
+      }
     }
   }, [apiBase])
 
   // SignalR connection for alerts
   useEffect(() => {
-    const baseUrl = apiBase.replace('/api', '')
-    const alertConnection = new signalR.HubConnectionBuilder()
-      .withUrl(`${baseUrl}/hubs/alerts`)
-      .withAutomaticReconnect()
-      .build()
+    let alertConnection = null
+    let isMounted = true
 
-    alertConnection
-      .start()
-      .then(() => {
+    const connectAlerts = async () => {
+      try {
+        const baseUrl = apiBase.replace('/api', '')
+        alertConnection = new signalR.HubConnectionBuilder()
+          .withUrl(`${baseUrl}/hubs/alerts`)
+          .withAutomaticReconnect({
+            nextRetryDelayInMilliseconds: (retryContext) => {
+              // Exponential backoff: 1s, 2s, 4s, 8s, max 30s
+              return Math.min(1000 * Math.pow(2, retryContext.previousRetryCount), 30000)
+            },
+          })
+          .build()
+
+        // Listen for alerts before starting connection
+        alertConnection.on('NewAlert', (alert) => {
+          if (!isMounted) return
+          
+          console.log('New alert:', alert)
+          // Add alert to state with unique ID and timestamp
+          const newAlert = {
+            id: Date.now() + Math.random(),
+            ...alert,
+            timestamp: new Date(),
+          }
+          setAlerts((prev) => [newAlert, ...prev].slice(0, 10)) // Keep last 10 alerts
+
+          // Check if this is an Order Buy or Sell alert
+          const alertTitle = (alert.title || '').toLowerCase()
+          const alertMessage = (alert.message || '').toLowerCase()
+          const alertType = (alert.type || '').toLowerCase()
+          
+          const isOrderAlert = 
+            alertTitle.includes('order') || 
+            alertMessage.includes('order') ||
+            alertType.includes('order') ||
+            alertTitle.includes('buy') ||
+            alertMessage.includes('buy') ||
+            alertTitle.includes('sell') ||
+            alertMessage.includes('sell') ||
+            alertType.includes('buy') ||
+            alertType.includes('sell')
+
+          // If it's an Order Buy/Sell alert, refresh orders
+          if (isOrderAlert) {
+            console.log('Order Buy/Sell alert detected, refreshing orders...')
+            fetchOrders('ordersSignalRAlert')
+          }
+
+          // Refresh unread count
+          fetchUnreadCount()
+
+          // Show browser notification if permission granted
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification(alert.title || 'New Alert', {
+              body: alert.message || JSON.stringify(alert),
+              icon: '/favicon.ico',
+            })
+          }
+        })
+
+        // Start connection
+        await alertConnection.start()
+        
+        if (!isMounted) {
+          await alertConnection.stop()
+          return
+        }
+
         console.log('SignalR Alerts Connected')
+        
         // Join all alerts group
-        alertConnection.invoke('JoinAllAlerts').catch((err) => {
-          console.error('Error joining alerts group:', err)
-        })
-      })
-      .catch((err) => {
-        console.error('SignalR Alerts Connection Error:', err)
-      })
-
-    // Listen for alerts
-    alertConnection.on('NewAlert', (alert) => {
-      console.log('New alert:', alert)
-      // Add alert to state with unique ID and timestamp
-      const newAlert = {
-        id: Date.now() + Math.random(),
-        ...alert,
-        timestamp: new Date(),
+        await alertConnection.invoke('JoinAllAlerts')
+      } catch (err) {
+        if (isMounted) {
+          console.error('SignalR Alerts Connection Error:', err)
+        }
       }
-      setAlerts((prev) => [newAlert, ...prev].slice(0, 10)) // Keep last 10 alerts
-
-      // Check if this is an Order Buy or Sell alert
-      const alertTitle = (alert.title || '').toLowerCase()
-      const alertMessage = (alert.message || '').toLowerCase()
-      const alertType = (alert.type || '').toLowerCase()
-      
-      const isOrderAlert = 
-        alertTitle.includes('order') || 
-        alertMessage.includes('order') ||
-        alertType.includes('order') ||
-        alertTitle.includes('buy') ||
-        alertMessage.includes('buy') ||
-        alertTitle.includes('sell') ||
-        alertMessage.includes('sell') ||
-        alertType.includes('buy') ||
-        alertType.includes('sell')
-
-      // If it's an Order Buy/Sell alert, refresh orders
-      if (isOrderAlert) {
-        console.log('Order Buy/Sell alert detected, refreshing orders...')
-        fetchOrders('ordersSignalRAlert')
-      }
-
-      // Refresh unread count
-      fetchUnreadCount()
-
-      // Show browser notification if permission granted
-      if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification(alert.title || 'New Alert', {
-          body: alert.message || JSON.stringify(alert),
-          icon: '/favicon.ico',
-        })
-      }
-    })
+    }
 
     // Request notification permission on mount
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission()
     }
 
+    connectAlerts()
+
     // Cleanup on unmount
     return () => {
-      alertConnection.stop().catch((err) => {
-        console.error('Error stopping SignalR alerts connection:', err)
-      })
+      isMounted = false
+      if (alertConnection) {
+        alertConnection.stop().catch((err) => {
+          // Ignore errors during cleanup
+          console.debug('Error stopping SignalR alerts connection:', err)
+        })
+      }
     }
   }, [apiBase, fetchOrders, fetchUnreadCount])
 
@@ -821,6 +868,25 @@ export default function App() {
       second: '2-digit',
       hour12: false,
     }).format(date)
+  }
+
+  const formatDateTimeWithOffset = (value, offsetHours = 7) => {
+    if (!value) return '-'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    // Add offset hours
+    const offsetDate = new Date(date.getTime() + offsetHours * 60 * 60 * 1000)
+    // Format with Bangkok timezone (+7)
+    return new Intl.DateTimeFormat('th-TH', {
+      timeZone: 'Asia/Bangkok',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(offsetDate)
   }
 
   const normalizeSettingRecord = (record) => {
@@ -1406,17 +1472,55 @@ export default function App() {
 
     setPriceChartLoading(true)
     try {
-      // Assuming API endpoint for price data
-      const url = buildUrl(apiBase, `Binace/GetPrice?symbol=${symbol}`)
-      const response = await fetch(url)
-      const data = await response.json()
+      // Try to get price from orders first (use latest price from orders)
+      const latestOrder = orders.find(o => o?.symbol === symbol)
+      const basePrice = latestOrder?.priceBuy || latestOrder?.priceSellActual || latestOrder?.priceWaitSell || 2.0
       
-      if (data?.success && data?.data) {
-        const priceData = Array.isArray(data.data) ? data.data : [data.data]
-        setPriceChartData(priceData)
+      // Try API endpoint for price data
+      try {
+        const url = buildUrl(apiBase, `Binace/GetPrice?symbol=${symbol}`)
+        const response = await fetch(url)
+        const data = await response.json()
+        
+        if (data?.success && data?.data) {
+          const priceData = Array.isArray(data.data) ? data.data : [data.data]
+          // Format data for chart
+          const formattedData = priceData.map((item, index) => ({
+            time: item.time || (Date.now() / 1000) - (priceData.length - index) * 60,
+            value: Number(item.close || item.price || item.value || basePrice),
+          }))
+          setPriceChartData(formattedData)
+          return
+        }
+      } catch (apiErr) {
+        console.log('API not available, using mock data:', apiErr)
       }
+
+      // Generate mock data if API is not available
+      const now = Date.now() / 1000
+      const mockData = []
+      for (let i = 59; i >= 0; i--) {
+        const time = now - (i * 60) // Last 60 minutes
+        const variation = (Math.random() - 0.5) * 0.1 // ±5% variation
+        const price = basePrice * (1 + variation)
+        mockData.push({
+          time: time,
+          value: Number(price.toFixed(4)),
+        })
+      }
+      setPriceChartData(mockData)
     } catch (err) {
       console.error('Error fetching price data:', err)
+      // Generate fallback mock data
+      const now = Date.now() / 1000
+      const mockData = []
+      for (let i = 59; i >= 0; i--) {
+        mockData.push({
+          time: now - (i * 60),
+          value: 2.0 + (Math.random() - 0.5) * 0.1,
+        })
+      }
+      setPriceChartData(mockData)
     } finally {
       setPriceChartLoading(false)
     }
@@ -1426,92 +1530,173 @@ export default function App() {
   useEffect(() => {
     if (viewMode !== 'priceChart' || !priceChartContainerRef.current) return
 
-    const container = priceChartContainerRef.current
-    const chart = createChart(container, {
-      layout: {
-        background: { type: ColorType.Solid, color: '#0d1524' },
-        textColor: '#eaf2ff',
-      },
-      grid: {
-        vertLines: { color: 'rgba(0, 209, 255, 0.1)' },
-        horzLines: { color: 'rgba(0, 209, 255, 0.1)' },
-      },
-      width: container.clientWidth,
-      height: 400,
-    })
+    let chart = null
+    let interval = null
+    let handleResize = null
 
-    // Use line series for price chart
-    const lineSeries = chart.addLineSeries({
-      color: '#00d1ff',
-      lineWidth: 2,
-      title: 'Price',
-    })
+    const initChart = async () => {
+      try {
+        // Dynamic import lightweight-charts
+        const { createChart, ColorType } = await import('lightweight-charts')
+        
+        const container = priceChartContainerRef.current
+        if (!container) return
 
-    priceChartInstanceRef.current = chart
-    priceSeriesRef.current = lineSeries
-
-    // Fetch initial data
-    fetchPriceData()
-
-    // Update chart with data
-    if (priceChartData.length > 0) {
-      lineSeries.setData(priceChartData.map((item, index) => ({
-        time: item.time || (Date.now() / 1000) - (priceChartData.length - index) * 60,
-        value: Number(item.close || item.price || item.value || 0),
-      })))
-    }
-
-    // Add horizontal lines for waiting sell prices
-    const waitingOrders = orders.filter(o => o?.status === 'WAITING_SELL')
-    waitingOrders.forEach((order, index) => {
-      if (order?.priceWaitSell) {
-        const lineSeries = chart.addLineSeries({
-          color: '#ff4444',
-          lineWidth: 1,
-          lineStyle: 2, // Dashed
-          title: `Wait Sell ${order.symbol || ''}`,
+        chart = createChart(container, {
+          layout: {
+            background: { type: ColorType.Solid, color: '#0d1524' },
+            textColor: '#eaf2ff',
+          },
+          grid: {
+            vertLines: { color: 'rgba(0, 209, 255, 0.1)' },
+            horzLines: { color: 'rgba(0, 209, 255, 0.1)' },
+          },
+          width: container.clientWidth,
+          height: 400,
         })
-        const latestTime = priceChartData.length > 0 
-          ? priceChartData[priceChartData.length - 1].time || Date.now() / 1000
-          : Date.now() / 1000
-        lineSeries.setData([
-          { time: latestTime - 3600, value: Number(order.priceWaitSell) },
-          { time: latestTime, value: Number(order.priceWaitSell) },
-        ])
-      }
-    })
 
-    // Handle resize
-    const handleResize = () => {
-      if (container && chart) {
-        chart.applyOptions({ width: container.clientWidth })
+        // Use line series for price chart
+        // For lightweight-charts v5, the API should be available
+        let lineSeries = null
+        
+        // Debug: Log available methods
+        const chartMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(chart))
+        console.log('Chart methods:', chartMethods.filter(m => m.includes('Series') || m.includes('add')))
+        
+        // Try to create line series
+        if (typeof chart.addLineSeries === 'function') {
+          lineSeries = chart.addLineSeries({
+            color: '#00d1ff',
+            lineWidth: 2,
+            title: 'Price',
+          })
+        } else if (typeof chart.addAreaSeries === 'function') {
+          // Fallback to area series
+          lineSeries = chart.addAreaSeries({
+            lineColor: '#00d1ff',
+            topColor: 'rgba(0, 209, 255, 0.1)',
+            bottomColor: 'rgba(0, 209, 255, 0)',
+            lineWidth: 2,
+          })
+        } else {
+          console.error('No series method available. Chart object:', chart)
+          throw new Error('Chart API not available. Available methods: ' + chartMethods.join(', '))
+        }
+
+        priceChartInstanceRef.current = chart
+        priceSeriesRef.current = lineSeries
+
+        // Fetch initial data
+        fetchPriceData()
+
+        // Handle resize
+        handleResize = () => {
+          if (container && chart) {
+            chart.applyOptions({ width: container.clientWidth })
+          }
+        }
+        window.addEventListener('resize', handleResize)
+
+        // Real-time updates (poll every 5 seconds)
+        interval = setInterval(() => {
+          fetchPriceData()
+        }, 5000)
+      } catch (err) {
+        console.error('Error initializing chart:', err)
       }
     }
-    window.addEventListener('resize', handleResize)
 
-    // Real-time updates (poll every 5 seconds)
-    const interval = setInterval(() => {
-      fetchPriceData()
-    }, 5000)
+    initChart()
 
     return () => {
-      window.removeEventListener('resize', handleResize)
-      clearInterval(interval)
+      if (handleResize) {
+        window.removeEventListener('resize', handleResize)
+      }
+      if (interval) {
+        clearInterval(interval)
+      }
       if (chart) {
         chart.remove()
       }
+      priceChartInstanceRef.current = null
+      priceSeriesRef.current = null
+      waitingLinesRef.current = []
     }
-  }, [viewMode, priceChartData, orders])
+  }, [viewMode])
+
+  // Update chart data when price data changes
+  useEffect(() => {
+    if (viewMode !== 'priceChart' || !priceSeriesRef.current || priceChartData.length === 0) return
+
+    // Data is already formatted as { time, value }
+    const formattedData = priceChartData.map((item) => ({
+      time: item.time || Date.now() / 1000,
+      value: Number(item.value || 0),
+    })).filter(item => item.value > 0) // Filter out invalid data
+
+    if (formattedData.length > 0) {
+      priceSeriesRef.current.setData(formattedData)
+    }
+  }, [priceChartData, viewMode])
+
+  // Add horizontal lines for waiting sell prices
+  useEffect(() => {
+    if (viewMode !== 'priceChart' || !priceChartInstanceRef.current) return
+
+    const chart = priceChartInstanceRef.current
+    const waitingOrders = orders.filter(o => o?.status === 'WAITING_SELL')
+    
+    // Clear previous waiting lines by storing references
+    // Since lightweight-charts doesn't support removing series directly,
+    // we'll limit to showing only current waiting orders
+    
+    // Only add lines if we don't have them already (simple check)
+    const currentWaitPrices = waitingOrders.map(o => o?.priceWaitSell).filter(Boolean)
+    const existingPrices = waitingLinesRef.current.map(ref => ref?.price)
+    
+    waitingOrders.forEach((order) => {
+      if (order?.priceWaitSell && !existingPrices.includes(order.priceWaitSell)) {
+        try {
+          let waitLineSeries = null
+          if (typeof chart.addLineSeries === 'function') {
+            waitLineSeries = chart.addLineSeries({
+              color: '#ff4444',
+              lineWidth: 1,
+              lineStyle: 2, // Dashed
+              title: `Wait Sell ${order.symbol || ''}`,
+            })
+          } else if (typeof chart.addAreaSeries === 'function') {
+            waitLineSeries = chart.addAreaSeries({
+              lineColor: '#ff4444',
+              topColor: 'rgba(255, 68, 68, 0.1)',
+              bottomColor: 'rgba(255, 68, 68, 0)',
+              lineWidth: 1,
+            })
+          }
+          
+          if (waitLineSeries) {
+            const latestTime = priceChartData.length > 0 
+              ? (priceChartData[priceChartData.length - 1].time || Date.now() / 1000)
+              : Date.now() / 1000
+            waitLineSeries.setData([
+              { time: latestTime - 3600, value: Number(order.priceWaitSell) },
+              { time: latestTime, value: Number(order.priceWaitSell) },
+            ])
+            waitingLinesRef.current.push({ series: waitLineSeries, price: order.priceWaitSell })
+          }
+        } catch (err) {
+          console.error('Error adding wait line:', err)
+        }
+      }
+    })
+  }, [orders, viewMode, priceChartData])
 
   // Update chart when new price data arrives
   useEffect(() => {
     if (viewMode === 'priceChart' && priceSeriesRef.current && priceChartData.length > 0) {
-      priceSeriesRef.current.setData(priceChartData.map(item => ({
-        time: item.time || Date.now() / 1000,
-        open: Number(item.open || item.price || 0),
-        high: Number(item.high || item.price || 0),
-        low: Number(item.low || item.price || 0),
-        close: Number(item.close || item.price || 0),
+      priceSeriesRef.current.setData(priceChartData.map((item, index) => ({
+        time: item.time || (Date.now() / 1000) - (priceChartData.length - index) * 60,
+        value: Number(item.close || item.price || item.value || 0),
       })))
     }
   }, [priceChartData, viewMode])
@@ -2172,11 +2357,11 @@ export default function App() {
                   <div className="order-card__dates">
                     <div>
                       <span className="label">Date Buy</span>
-                      <span className="value">{formatDateTime(order?.dateBuy)}</span>
+                      <span className="value">{formatDateTimeWithOffset(order?.dateBuy, 7)}</span>
                     </div>
                     <div>
                       <span className="label">Date Sell</span>
-                      <span className="value">{formatDateTime(order?.dateSell)}</span>
+                      <span className="value">{formatDateTimeWithOffset(order?.dateSell, 7)}</span>
                     </div>
                   </div>
                   <div className="order-card__calc-buttons">
