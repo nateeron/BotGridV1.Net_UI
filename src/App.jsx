@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import * as signalR from '@microsoft/signalr'
+import { createChart, ColorType } from 'lightweight-charts'
 
 const tabs = [
   { key: 'orders', label: 'Orders', icon: '📦' },
@@ -135,7 +136,7 @@ const defaultFilledOrdersForm = {
   Symbol: '',
   OrderSide: '',
   StartTime: '',
-  Limit: 50,
+  Limit: 25,
 }
 
 export default function App() {
@@ -161,10 +162,16 @@ export default function App() {
   const [orderModalData, setOrderModalData] = useState(null)
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
   const [sellModalData, setSellModalData] = useState(null)
-  const [viewMode, setViewMode] = useState(() => loadPrimitiveState('viewMode', 'chart')) // 'chart', 'calculate', 'trade'
+  const [viewMode, setViewMode] = useState(() => loadPrimitiveState('viewMode', 'chart')) // 'chart', 'calculate', 'trade', 'priceChart'
+  const [priceChartData, setPriceChartData] = useState([])
+  const [priceChartLoading, setPriceChartLoading] = useState(false)
+  const priceChartRef = useRef(null)
+  const priceChartContainerRef = useRef(null)
+  const priceChartInstanceRef = useRef(null)
+  const priceSeriesRef = useRef(null)
   const [cal1, setCal1] = useState(() => loadPrimitiveState('cal1', ''))
   const [cal2, setCal2] = useState(() => loadPrimitiveState('cal2', ''))
-  const [percentInput, setPercentInput] = useState(() => loadPrimitiveState('percentInput', ''))
+  const [percentInput, setPercentInput] = useState(() => loadPrimitiveState('percentInput', '100'))
   const [tradeForm, setTradeForm] = useState(() => loadObjectState('tradeForm', defaultTradeForm))
   const [tradeLoading, setTradeLoading] = useState(false)
   const [isTradeVerificationOpen, setIsTradeVerificationOpen] = useState(false)
@@ -530,7 +537,7 @@ export default function App() {
     try {
       const payload = {
         ConfigId: Number(reportConfigId || 1),
-        Limit: Number(filledOrdersForm.Limit) || 50,
+        Limit: Number(filledOrdersForm.Limit) || 25,
       }
       if (filledOrdersForm.Symbol) payload.Symbol = filledOrdersForm.Symbol.toUpperCase()
       if (filledOrdersForm.OrderSide) payload.OrderSide = filledOrdersForm.OrderSide
@@ -752,6 +759,28 @@ export default function App() {
       }
       setAlerts((prev) => [newAlert, ...prev].slice(0, 10)) // Keep last 10 alerts
 
+      // Check if this is an Order Buy or Sell alert
+      const alertTitle = (alert.title || '').toLowerCase()
+      const alertMessage = (alert.message || '').toLowerCase()
+      const alertType = (alert.type || '').toLowerCase()
+      
+      const isOrderAlert = 
+        alertTitle.includes('order') || 
+        alertMessage.includes('order') ||
+        alertType.includes('order') ||
+        alertTitle.includes('buy') ||
+        alertMessage.includes('buy') ||
+        alertTitle.includes('sell') ||
+        alertMessage.includes('sell') ||
+        alertType.includes('buy') ||
+        alertType.includes('sell')
+
+      // If it's an Order Buy/Sell alert, refresh orders
+      if (isOrderAlert) {
+        console.log('Order Buy/Sell alert detected, refreshing orders...')
+        fetchOrders('ordersSignalRAlert')
+      }
+
       // Refresh unread count
       fetchUnreadCount()
 
@@ -775,7 +804,7 @@ export default function App() {
         console.error('Error stopping SignalR alerts connection:', err)
       })
     }
-  }, [apiBase])
+  }, [apiBase, fetchOrders, fetchUnreadCount])
 
   const formatDateTime = (value) => {
     if (!value) return '-'
@@ -1358,6 +1387,157 @@ export default function App() {
     setAlerts([])
   }
 
+  // Get symbol from orders or settings
+  const getChartSymbol = () => {
+    if (orders.length > 0) {
+      return orders[0]?.symbol || 'XRPUSDT'
+    }
+    if (settings.length > 0) {
+      const setting = settings.find(s => s.id === selectedSettingId) || settings[0]
+      return setting?.symbol || setting?.SYMBOL || 'XRPUSDT'
+    }
+    return 'XRPUSDT'
+  }
+
+  // Fetch price data from API
+  const fetchPriceData = async () => {
+    const symbol = getChartSymbol()
+    if (!symbol) return
+
+    setPriceChartLoading(true)
+    try {
+      // Assuming API endpoint for price data
+      const url = buildUrl(apiBase, `Binace/GetPrice?symbol=${symbol}`)
+      const response = await fetch(url)
+      const data = await response.json()
+      
+      if (data?.success && data?.data) {
+        const priceData = Array.isArray(data.data) ? data.data : [data.data]
+        setPriceChartData(priceData)
+      }
+    } catch (err) {
+      console.error('Error fetching price data:', err)
+    } finally {
+      setPriceChartLoading(false)
+    }
+  }
+
+  // Initialize lightweight chart
+  useEffect(() => {
+    if (viewMode !== 'priceChart' || !priceChartContainerRef.current) return
+
+    const container = priceChartContainerRef.current
+    const chart = createChart(container, {
+      layout: {
+        background: { type: ColorType.Solid, color: '#0d1524' },
+        textColor: '#eaf2ff',
+      },
+      grid: {
+        vertLines: { color: 'rgba(0, 209, 255, 0.1)' },
+        horzLines: { color: 'rgba(0, 209, 255, 0.1)' },
+      },
+      width: container.clientWidth,
+      height: 400,
+    })
+
+    // Use line series for price chart
+    const lineSeries = chart.addLineSeries({
+      color: '#00d1ff',
+      lineWidth: 2,
+      title: 'Price',
+    })
+
+    priceChartInstanceRef.current = chart
+    priceSeriesRef.current = lineSeries
+
+    // Fetch initial data
+    fetchPriceData()
+
+    // Update chart with data
+    if (priceChartData.length > 0) {
+      lineSeries.setData(priceChartData.map((item, index) => ({
+        time: item.time || (Date.now() / 1000) - (priceChartData.length - index) * 60,
+        value: Number(item.close || item.price || item.value || 0),
+      })))
+    }
+
+    // Add horizontal lines for waiting sell prices
+    const waitingOrders = orders.filter(o => o?.status === 'WAITING_SELL')
+    waitingOrders.forEach((order, index) => {
+      if (order?.priceWaitSell) {
+        const lineSeries = chart.addLineSeries({
+          color: '#ff4444',
+          lineWidth: 1,
+          lineStyle: 2, // Dashed
+          title: `Wait Sell ${order.symbol || ''}`,
+        })
+        const latestTime = priceChartData.length > 0 
+          ? priceChartData[priceChartData.length - 1].time || Date.now() / 1000
+          : Date.now() / 1000
+        lineSeries.setData([
+          { time: latestTime - 3600, value: Number(order.priceWaitSell) },
+          { time: latestTime, value: Number(order.priceWaitSell) },
+        ])
+      }
+    })
+
+    // Handle resize
+    const handleResize = () => {
+      if (container && chart) {
+        chart.applyOptions({ width: container.clientWidth })
+      }
+    }
+    window.addEventListener('resize', handleResize)
+
+    // Real-time updates (poll every 5 seconds)
+    const interval = setInterval(() => {
+      fetchPriceData()
+    }, 5000)
+
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      clearInterval(interval)
+      if (chart) {
+        chart.remove()
+      }
+    }
+  }, [viewMode, priceChartData, orders])
+
+  // Update chart when new price data arrives
+  useEffect(() => {
+    if (viewMode === 'priceChart' && priceSeriesRef.current && priceChartData.length > 0) {
+      priceSeriesRef.current.setData(priceChartData.map(item => ({
+        time: item.time || Date.now() / 1000,
+        open: Number(item.open || item.price || 0),
+        high: Number(item.high || item.price || 0),
+        low: Number(item.low || item.price || 0),
+        close: Number(item.close || item.price || 0),
+      })))
+    }
+  }, [priceChartData, viewMode])
+
+  const renderPriceChart = () => (
+    <section className="card">
+      <header>
+        <div>
+          <p className="eyebrow">Price Chart</p>
+          <h3>{getChartSymbol()} - Real-time</h3>
+        </div>
+        <button className="secondary ghost" onClick={fetchPriceData} disabled={priceChartLoading}>
+          {priceChartLoading ? 'Loading...' : 'Refresh'}
+        </button>
+      </header>
+      <div 
+        ref={priceChartContainerRef} 
+        style={{ 
+          width: '100%', 
+          height: '400px',
+          position: 'relative'
+        }}
+      />
+    </section>
+  )
+
   const renderCalculate = () => (
     <section className="card">
       <header>
@@ -1400,16 +1580,75 @@ export default function App() {
         </div>
         <div className="result-item">
           <label>
-            % (0-100)
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              max="100"
-              value={percentInput}
-              onChange={(e) => setPercentInput(e.target.value)}
-              placeholder="0-100"
-            />
+            <div style={{ minWidth: '120px' }}> % (0-100)</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+              <div className="range-slider-container" style={{ flex: 1 }}>
+                <input
+                  type="range"
+                  min="0"
+                  max="10000"
+                  step="1"
+                  value={percentInput ? Math.round(Number(percentInput) * 100) : 0}
+                  onChange={(e) => {
+                    const value = Number(e.target.value) / 100
+                    setPercentInput(value.toFixed(2))
+                  }}
+                  className="range-slider"
+                />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  value={percentInput || ''}
+                  onChange={(e) => {
+                    let value = e.target.value
+                    if (value === '') {
+                      setPercentInput('')
+                      return
+                    }
+                    const numValue = Number(value)
+                    if (!isNaN(numValue)) {
+                      if (numValue < 0) {
+                        setPercentInput('0')
+                      } else if (numValue > 100) {
+                        setPercentInput('100')
+                      } else {
+                        setPercentInput(value)
+                      }
+                    }
+                  }}
+                  onBlur={(e) => {
+                    const numValue = Number(e.target.value)
+                    if (!isNaN(numValue) && e.target.value !== '') {
+                      setPercentInput(numValue.toFixed(2))
+                    } else if (e.target.value === '') {
+                      setPercentInput('100')
+                    }
+                  }}
+                  placeholder="0-100"
+                  style={{
+                    width: '80px',
+                    padding: '6px 8px',
+                    borderRadius: 'var(--radius)',
+                    border: '1px solid var(--border)',
+                    background: 'var(--surface)',
+                    color: 'var(--text)',
+                    fontSize: '13px',
+                    textAlign: 'center'
+                  }}
+                />
+                <span style={{ 
+                  fontSize: '13px', 
+                  color: 'var(--text-muted)',
+                  minWidth: '30px'
+                }}>
+                  {percentInput ? Number(percentInput).toFixed(2) : '0.00'}%
+                </span>
+              </div>
+            </div>
           </label>
         </div>
         <div className="result-item">
@@ -1539,15 +1778,74 @@ export default function App() {
             </label>
             <label>
               Portfolio Percent (%)
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                max="100"
-                value={tradeForm.PortfolioPercent}
-                onChange={(e) => setTradeForm((prev) => ({ ...prev, PortfolioPercent: e.target.value }))}
-                placeholder="e.g. 10"
-              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+                <div className="range-slider-container" style={{ flex: 1 }}>
+                  <input
+                    type="range"
+                    min="0"
+                    max="10000"
+                    step="1"
+                    value={tradeForm.PortfolioPercent ? Math.round(Number(tradeForm.PortfolioPercent) * 100) : 0}
+                    onChange={(e) => {
+                      const value = Number(e.target.value) / 100
+                      setTradeForm((prev) => ({ ...prev, PortfolioPercent: value.toFixed(2) }))
+                    }}
+                    className="range-slider"
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    value={tradeForm.PortfolioPercent || ''}
+                    onChange={(e) => {
+                      let value = e.target.value
+                      if (value === '') {
+                        setTradeForm((prev) => ({ ...prev, PortfolioPercent: '' }))
+                        return
+                      }
+                      const numValue = Number(value)
+                      if (!isNaN(numValue)) {
+                        if (numValue < 0) {
+                          setTradeForm((prev) => ({ ...prev, PortfolioPercent: '0' }))
+                        } else if (numValue > 100) {
+                          setTradeForm((prev) => ({ ...prev, PortfolioPercent: '100' }))
+                        } else {
+                          setTradeForm((prev) => ({ ...prev, PortfolioPercent: value }))
+                        }
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const numValue = Number(e.target.value)
+                      if (!isNaN(numValue) && e.target.value !== '') {
+                        setTradeForm((prev) => ({ ...prev, PortfolioPercent: numValue.toFixed(2) }))
+                      } else if (e.target.value === '') {
+                        setTradeForm((prev) => ({ ...prev, PortfolioPercent: '' }))
+                      }
+                    }}
+                    placeholder="0-100"
+                    style={{
+                      width: '80px',
+                      padding: '6px 8px',
+                      borderRadius: 'var(--radius)',
+                      border: '1px solid var(--border)',
+                      background: 'var(--surface)',
+                      color: 'var(--text)',
+                      fontSize: '13px',
+                      textAlign: 'center'
+                    }}
+                  />
+                  <span style={{ 
+                    fontSize: '13px', 
+                    color: 'var(--text-muted)',
+                    minWidth: '30px'
+                  }}>
+                    {tradeForm.PortfolioPercent ? Number(tradeForm.PortfolioPercent).toFixed(2) : '0.00'}%
+                  </span>
+                </div>
+              </div>
             </label>
           </div>
         </div>
@@ -1573,7 +1871,7 @@ export default function App() {
   )
 
   const renderAlertLogs = () => (
-    <section className="card alert-logs-card">
+    <div className="alert-logs-content">
       <header>
         <div>
           <p className="eyebrow">Alert Logs</p>
@@ -1705,13 +2003,53 @@ export default function App() {
           </div>
         )}
       </div>
-    </section>
+    </div>
   )
 
   const filteredOrders = useMemo(() => {
     if (orderFilter === 'all') return orders
     return orders.filter((order) => order?.status === orderFilter)
   }, [orders, orderFilter])
+
+  const orderCounts = useMemo(() => {
+    const all = orders.length
+    const sold = orders.filter((o) => o?.status === 'SOLD').length
+    const waiting = orders.filter((o) => o?.status === 'WAITING_SELL').length
+    return { all, sold, waiting }
+  }, [orders])
+
+  const orderTotals = useMemo(() => {
+    const waitingOrders = orders.filter((o) => o?.status === 'WAITING_SELL')
+    const soldOrders = orders.filter((o) => o?.status === 'SOLD')
+    
+    const waitingCoinQtyTotal = waitingOrders.reduce((sum, order) => {
+      const qty = Number(order?.coinQuantity ?? order?.quantity ?? 0)
+      return sum + qty
+    }, 0)
+    
+    const soldProfitLossTotal = soldOrders.reduce((sum, order) => {
+      const profit = Number(order?.profitLoss ?? 0)
+      return sum + profit
+    }, 0)
+    
+    return {
+      waitingCoinQtyTotal,
+      soldProfitLossTotal,
+    }
+  }, [orders])
+
+  // Get bot status for Orders tab (same logic as Tab Bot)
+  const ordersBotStatus = useMemo(() => {
+    const status = getStatusForSetting(selectedSettingId || 1)
+    if (!status) return null
+    const statusText = status?.status || 'Unknown'
+    const isRunning = statusText.toLowerCase() === 'running' || statusText.toLowerCase() === 'online'
+    return {
+      ...status,
+      statusText,
+      isRunning,
+    }
+  }, [botStatuses, selectedSettingId])
 
   const renderOrders = () => (
     <section className="card">
@@ -1720,86 +2058,53 @@ export default function App() {
           <p className="eyebrow">Orders</p>
           <h3>Waiting & Sold</h3>
         </div>
-        <button className="secondary ghost" onClick={() => fetchOrders('ordersManual')} disabled={ordersLoading}>
-          {ordersLoading ? 'Loading...' : 'Refresh'}
-        </button>
+        <div className="button-group">
+          <button className="secondary ghost" onClick={() => fetchOrders('ordersManual')} disabled={ordersLoading}>
+            {ordersLoading ? 'Loading...' : 'Refresh'}
+          </button>
+        </div>
       </header>
 
-      {/* Menu Bar with Filters and BuyPause Controls */}
-      <div className="order-menu-bar" style={{ 
+      {/* Filter Buttons */}
+      <div className="order-filter-bar" style={{ 
         display: 'flex', 
-        justifyContent: 'space-between', 
+        gap: '0.5rem', 
         alignItems: 'center', 
         padding: '1rem',
         borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-        gap: '1rem',
         flexWrap: 'wrap'
       }}>
-        {/* Filter Buttons */}
-        <div className="filter-buttons" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <span style={{ marginRight: '0.5rem', opacity: 0.7 }}>Filter:</span>
-          <button
-            className={`secondary ${orderFilter === 'all' ? '' : 'ghost'}`}
-            onClick={() => {
-              setOrderFilter('all')
-              sessionStorage.setItem('orderFilter', JSON.stringify('all'))
-            }}
-            style={{ fontSize: '0.875rem' }}
-          >
-            All
-          </button>
-          <button
-            className={`secondary ${orderFilter === 'SOLD' ? '' : 'ghost'}`}
-            onClick={() => {
-              setOrderFilter('SOLD')
-              sessionStorage.setItem('orderFilter', JSON.stringify('SOLD'))
-            }}
-            style={{ fontSize: '0.875rem' }}
-          >
-            SOLD
-          </button>
-          <button
-            className={`secondary ${orderFilter === 'WAITING_SELL' ? '' : 'ghost'}`}
-            onClick={() => {
-              setOrderFilter('WAITING_SELL')
-              sessionStorage.setItem('orderFilter', JSON.stringify('WAITING_SELL'))
-            }}
-            style={{ fontSize: '0.875rem' }}
-          >
-            WAITING_SELL
-          </button>
-        </div>
-
-        {/* BuyPause Status and Control */}
-        <div className="buy-pause-control" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.875rem', opacity: 0.7 }}>BuyPause:</span>
-            <span
-              style={{
-                width: '12px',
-                height: '12px',
-                borderRadius: '50%',
-                backgroundColor: buyPauseStatus.isPaused ? '#ff4444' : '#44ff44',
-                display: 'inline-block',
-                boxShadow: buyPauseStatus.isPaused 
-                  ? '0 0 8px rgba(255, 68, 68, 0.6)' 
-                  : '0 0 8px rgba(68, 255, 68, 0.6)',
-              }}
-              title={buyPauseStatus.message || (buyPauseStatus.isPaused ? 'Buy logic is paused' : 'Buy logic is active')}
-            />
-            <span style={{ fontSize: '0.875rem', opacity: 0.9 }}>
-              {buyPauseStatus.isPaused ? 'Paused' : 'Active'}
-            </span>
-          </div>
-          <button
-            className={buyPauseStatus.isPaused ? 'primary' : 'secondary'}
-            onClick={() => setBuyPauseState(!buyPauseStatus.isPaused)}
-            disabled={buyPauseStatus.loading}
-            style={{ fontSize: '0.875rem', minWidth: '80px' }}
-          >
-            {buyPauseStatus.loading ? '...' : buyPauseStatus.isPaused ? 'Resume' : 'Pause'}
-          </button>
-        </div>
+        <span style={{ marginRight: '0.5rem', opacity: 0.7 }}>Filter:</span>
+        <button
+          className={`secondary ${orderFilter === 'all' ? '' : 'ghost'}`}
+          onClick={() => {
+            setOrderFilter('all')
+            sessionStorage.setItem('orderFilter', JSON.stringify('all'))
+          }}
+          style={{ fontSize: '0.875rem' }}
+        >
+          All
+        </button>
+        <button
+          className={`secondary ${orderFilter === 'SOLD' ? '' : 'ghost'}`}
+          onClick={() => {
+            setOrderFilter('SOLD')
+            sessionStorage.setItem('orderFilter', JSON.stringify('SOLD'))
+          }}
+          style={{ fontSize: '0.875rem' }}
+        >
+          SOLD
+        </button>
+        <button
+          className={`secondary ${orderFilter === 'WAITING_SELL' ? '' : 'ghost'}`}
+          onClick={() => {
+            setOrderFilter('WAITING_SELL')
+            sessionStorage.setItem('orderFilter', JSON.stringify('WAITING_SELL'))
+          }}
+          style={{ fontSize: '0.875rem' }}
+        >
+          WAITING_SELL
+        </button>
       </div>
 
       <div className="order-list">
@@ -2317,28 +2622,61 @@ export default function App() {
             </div>
           </div>
           {allCoinsData.coins.length > 0 ? (
-            <div className="coins-list">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Coin</th>
-                    <th>Quantity</th>
-                    <th>Latest Price</th>
-                    <th>Value in USDT</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {allCoinsData.coins.map((coin, index) => (
-                    <tr key={index}>
-                      <td className="table-key">{coin.coin}</td>
-                      <td className="table-value">{Number(coin.quantity || 0).toFixed(8)}</td>
-                      <td className="table-value">{Number(coin.latestPrice || 0).toFixed(4)}</td>
-                      <td className="table-value">{Number(coin.valueInUSDT || 0).toFixed(4)}</td>
+            <>
+              {/* Chart Section */}
+              <div className="coins-chart-section">
+                <h4 style={{ margin: '0 0 16px 0', fontSize: '16px', color: '#00d1ff' }}>Portfolio Distribution</h4>
+                <div className="coins-chart-vertical">
+                  {allCoinsData.coins.map((coin, index) => {
+                    const value = Number(coin.valueInUSDT || 0)
+                    const totalValue = Number(allCoinsData.totalValueUSD || 1)
+                    const percentage = totalValue > 0 ? (value / totalValue) * 100 : 0
+                    return (
+                      <div key={index} className="chart-bar-item-vertical">
+                        <span className="chart-bar-percentage-vertical">{percentage.toFixed(1)}%</span>
+                        <div className="chart-bar-container-vertical">
+                          <div
+                            className="chart-bar-vertical"
+                            style={{
+                              height: `${percentage}%`,
+                            }}
+                          />
+                        </div>
+                        <div className="chart-bar-label-vertical">
+                          <span className="chart-coin-name">{coin.coin}</span>
+                          <span className="chart-coin-value">{value.toFixed(4)} USDT</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Table Section */}
+              <div className="coins-list">
+                <h4 style={{ margin: '24px 0 12px 0', fontSize: '16px', color: '#00d1ff' }}>Coins Table</h4>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Coin</th>
+                      <th>Quantity</th>
+                      <th>Latest Price</th>
+                      <th>Value in USDT</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {allCoinsData.coins.map((coin, index) => (
+                      <tr key={index}>
+                        <td className="table-key">{coin.coin}</td>
+                        <td className="table-value">{Number(coin.quantity || 0).toFixed(8)}</td>
+                        <td className="table-value">{Number(coin.latestPrice || 0).toFixed(4)}</td>
+                        <td className="table-value">{Number(coin.valueInUSDT || 0).toFixed(4)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           ) : (
             <div className="state-block empty">ยังไม่มีข้อมูล Coins</div>
           )}
@@ -2397,8 +2735,8 @@ export default function App() {
             Limit
             <input
               type="number"
-              value={filledOrdersForm.Limit || 50}
-              onChange={(e) => setFilledOrdersForm((prev) => ({ ...prev, Limit: Number(e.target.value) || 50 }))}
+              value={filledOrdersForm.Limit || 25}
+              onChange={(e) => setFilledOrdersForm((prev) => ({ ...prev, Limit: Number(e.target.value) || 25 }))}
               min="1"
               max="100"
             />
@@ -2520,15 +2858,137 @@ export default function App() {
         </div>
       </div>
 
+      {/* Top Bar with Orders Info and Controls */}
+      <div className="app-top-bar">
+        <div className="top-bar-content">
+          {/* Orders Info */}
+          <div className="top-bar-orders-info">
+            <div className="top-bar-item">
+              <span className="top-bar-label">Orders:</span>
+              <span className="top-bar-value">
+                All: {orderCounts.all} | SOLD: {orderCounts.sold} | WAITING: {orderCounts.waiting}
+              </span>
+            </div>
+            <div className="top-bar-item">
+              <span className="top-bar-label">Waiting Qty:</span>
+              <span className="top-bar-value accent">
+                {orderTotals.waitingCoinQtyTotal.toFixed(4)}
+              </span>
+            </div>
+            <div className="top-bar-item">
+              <span className="top-bar-label">Sold P/L:</span>
+              <span className={`top-bar-value ${orderTotals.soldProfitLossTotal >= 0 ? 'positive' : 'negative'}`}>
+                {orderTotals.soldProfitLossTotal >= 0 ? '+' : ''}
+                {orderTotals.soldProfitLossTotal.toFixed(4)}
+              </span>
+            </div>
+          </div>
+
+          {/* BuyPause and Bot Controls */}
+          <div className="top-bar-controls">
+            {/* BuyPause Status and Control */}
+            <div className="top-bar-control-item">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.875rem', opacity: 0.7 }}>BuyPause:</span>
+                <span
+                  style={{
+                    width: '10px',
+                    height: '10px',
+                    borderRadius: '50%',
+                    backgroundColor: buyPauseStatus.isPaused ? '#ff4444' : '#44ff44',
+                    display: 'inline-block',
+                    boxShadow: buyPauseStatus.isPaused 
+                      ? '0 0 6px rgba(255, 68, 68, 0.6)' 
+                      : '0 0 6px rgba(68, 255, 68, 0.6)',
+                  }}
+                  title={buyPauseStatus.message || (buyPauseStatus.isPaused ? 'Buy logic is paused' : 'Buy logic is active')}
+                />
+                <span style={{ fontSize: '0.875rem', opacity: 0.9 }}>
+                  {buyPauseStatus.isPaused ? 'Paused' : 'Active'}
+                </span>
+              </div>
+              <button
+                className={buyPauseStatus.isPaused ? 'primary small' : 'secondary small'}
+                onClick={() => setBuyPauseState(!buyPauseStatus.isPaused)}
+                disabled={buyPauseStatus.loading}
+                style={{ fontSize: '0.75rem', padding: '4px 8px', minWidth: '60px' }}
+              >
+                {buyPauseStatus.loading ? '...' : buyPauseStatus.isPaused ? 'Resume' : 'Pause'}
+              </button>
+            </div>
+
+            {/* Bot Status and Control */}
+            <div className="top-bar-control-item">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.875rem', opacity: 0.7 }}>Bot:</span>
+                <span
+                  style={{
+                    width: '10px',
+                    height: '10px',
+                    borderRadius: '50%',
+                    backgroundColor: ordersBotStatus?.isRunning ? '#44ff44' : '#ff4444',
+                    display: 'inline-block',
+                    boxShadow: ordersBotStatus?.isRunning 
+                      ? '0 0 6px rgba(68, 255, 68, 0.6)' 
+                      : '0 0 6px rgba(255, 68, 68, 0.6)',
+                  }}
+                  title={ordersBotStatus?.message || (ordersBotStatus?.isRunning ? 'Bot is running' : 'Bot is stopped')}
+                />
+                <span style={{ fontSize: '0.875rem', opacity: 0.9, fontWeight: 600 }}>
+                  {ordersBotStatus?.statusText || 'Unknown'}
+                </span>
+              </div>
+              <button
+                className="secondary ghost small"
+                onClick={() => handleBotAction(ordersBotStatus?.isRunning ? 'stop' : 'start', selectedSettingId || 1)}
+                disabled={botStatusLoading}
+                style={{ fontSize: '0.75rem', padding: '4px 8px', minWidth: 'auto' }}
+                title={ordersBotStatus?.isRunning ? 'Stop Bot' : 'Start Bot'}
+              >
+                {ordersBotStatus?.isRunning ? '⏹' : '▶'}
+              </button>
+            </div>
+          </div>
+
+          {/* View Mode Menu */}
+          {activeTab === 'orders' && (
+            <div className="top-bar-view-menu">
+              <button
+                className={`view-menu-item ${viewMode === 'chart' ? 'active' : ''}`}
+                onClick={() => setViewMode('chart')}
+              >
+                Chart
+              </button>
+              <button
+                className={`view-menu-item ${viewMode === 'priceChart' ? 'active' : ''}`}
+                onClick={() => setViewMode('priceChart')}
+              >
+                Price Chart
+              </button>
+              <button
+                className={`view-menu-item ${viewMode === 'calculate' ? 'active' : ''}`}
+                onClick={() => setViewMode('calculate')}
+              >
+                Calculate
+              </button>
+              <button
+                className={`view-menu-item ${viewMode === 'trade' ? 'active' : ''}`}
+                onClick={() => setViewMode('trade')}
+              >
+                Trade
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Top Right Controls */}
       <div className="top-right-controls">
         <button
           className="top-control-btn"
           onClick={() => {
-            setShowAlertLogs(!showAlertLogs)
-            if (!showAlertLogs) {
-              fetchAlertLogs()
-            }
+            setShowAlertLogs(true)
+            fetchAlertLogs()
           }}
           title="Alert Logs"
         >
@@ -2541,7 +3001,6 @@ export default function App() {
       </div>
 
       <main className="content">
-        {showAlertLogs && renderAlertLogs()}
         {activeTab === 'orders' && (
           <>
             {viewMode === 'chart' && (
@@ -2549,36 +3008,21 @@ export default function App() {
                 <TradingViewWidget />
               </div>
             )}
+            {viewMode === 'priceChart' && renderPriceChart()}
             {viewMode === 'calculate' && renderCalculate()}
             {viewMode === 'trade' && renderTrade()}
-            <div className="chart-menu-bar">
-              <button
-                className={viewMode === 'chart' ? 'menu-btn active' : 'menu-btn'}
-                onClick={() => setViewMode('chart')}
-              >
-                Chart
-              </button>
-              <button
-                className={viewMode === 'calculate' ? 'menu-btn active' : 'menu-btn'}
-                onClick={() => setViewMode('calculate')}
-              >
-                Calculate
-              </button>
-              <button
-                className={viewMode === 'trade' ? 'menu-btn active' : 'menu-btn'}
-                onClick={() => setViewMode('trade')}
-              >
-                Trad
-              </button>
-              <button
-                className="menu-btn create-order-btn"
-                onClick={openBuyNowForm}
-                disabled={buyNowLoading}
-                title="Create Order"
-              >
-                ➕
-              </button>
-            </div>
+            {viewMode === 'chart' && (
+              <div style={{ marginTop: '16px' }}>
+                <button
+                  className="primary"
+                  onClick={openBuyNowForm}
+                  disabled={buyNowLoading}
+                  title="Create Order"
+                >
+                  ➕
+                </button>
+              </div>
+            )}
           </>
         )}
         {activeTab === 'orders' && renderOrders()}
@@ -3032,6 +3476,20 @@ export default function App() {
                 disabled={verificationInput !== verificationKey || tradeLoading}
               >
                 {tradeLoading ? 'Processing...' : 'ยืนยัน'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Alert Logs Modal */}
+      {showAlertLogs && (
+        <div className="modal-backdrop" onClick={() => setShowAlertLogs(false)}>
+          <div className="modal alert-logs-modal" onClick={(e) => e.stopPropagation()}>
+            {renderAlertLogs()}
+            <div className="button-group" style={{ marginTop: '16px' }}>
+              <button className="secondary ghost" type="button" onClick={() => setShowAlertLogs(false)}>
+                Close
               </button>
             </div>
           </div>
