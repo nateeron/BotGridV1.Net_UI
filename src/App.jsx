@@ -71,8 +71,8 @@ const buildUrl = (base, endpoint) => {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('orders')
-  const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
-  //const [apiBase, setApiBase] = useState('http://localhost:5081/api')
+  //const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
+  const [apiBase, setApiBase] = useState('http://localhost:5081/api')
   const [loadingKey, setLoadingKey] = useState(null)
   const [orders, setOrders] = useState([])
   const [ordersLoading, setOrdersLoading] = useState(false)
@@ -90,6 +90,31 @@ export default function App() {
   const [orderModalData, setOrderModalData] = useState(null)
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
   const [sellModalData, setSellModalData] = useState(null)
+  const [showChart, setShowChart] = useState(true)
+  const [cal1, setCal1] = useState('')
+  const [cal2, setCal2] = useState('')
+  const [percentInput, setPercentInput] = useState('')
+  const [alerts, setAlerts] = useState([])
+  const [alertLogs, setAlertLogs] = useState([])
+  const [alertLogsLoading, setAlertLogsLoading] = useState(false)
+  const [alertLogsError, setAlertLogsError] = useState(null)
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [alertFilters, setAlertFilters] = useState({
+    Limit: null,
+    Offset: 0,
+    Type: '',
+    Level: '',
+    ConfigId: '',
+    FromDate: null,
+    ToDate: null,
+    IsRead: null,
+  })
+  const [showAlertLogs, setShowAlertLogs] = useState(false)
+  const [backupImportMode, setBackupImportMode] = useState('file') // 'file' or 'text'
+  const [backupFile, setBackupFile] = useState(null)
+  const [backupJsonText, setBackupJsonText] = useState('')
+  const [backupReplaceExisting, setBackupReplaceExisting] = useState(true)
+  const [backupLoading, setBackupLoading] = useState(false)
   const emptySettingTemplate = useMemo(
     () => ({
       id: null,
@@ -230,10 +255,76 @@ export default function App() {
     }
   }
 
+  const fetchAlertLogs = async () => {
+    setAlertLogsLoading(true)
+    setAlertLogsError(null)
+    try {
+      await runRequest('alertLogs', 'Alert/GetLogs', {
+        payload: alertFilters,
+        onSuccess: (payload) => {
+          const logs = payload?.data?.logs || []
+          setAlertLogs(logs)
+        },
+        onError: (err) => {
+          setAlertLogsError(err)
+        },
+      })
+    } finally {
+      setAlertLogsLoading(false)
+    }
+  }
+
+  const markAlertAsRead = async (alertId) => {
+    await runRequest(`markRead-${alertId}`, 'Alert/MarkAsRead', {
+      payload: { AlertId: alertId },
+      onSuccess: () => {
+        // Update local state
+        setAlertLogs((prev) =>
+          prev.map((log) => (log.id === alertId ? { ...log, isRead: true, readAt: new Date() } : log))
+        )
+        // Refresh unread count
+        fetchUnreadCount()
+      },
+    })
+  }
+
+  const fetchUnreadCount = async () => {
+    try {
+      await runRequest('unreadCount', 'Alert/GetUnreadCount', {
+        payload: { ConfigId: null },
+        onSuccess: (payload) => {
+          setUnreadCount(payload?.count || 0)
+        },
+      })
+    } catch (err) {
+      console.error('Error fetching unread count:', err)
+    }
+  }
+
+  const clearLogs = async () => {
+    const confirmed = window.confirm('ต้องการลบ logs ทั้งหมดหรือไม่?')
+    if (!confirmed) return
+    await runRequest('clearLogs', 'Alert/ClearLogs', {
+      payload: {},
+      onSuccess: () => {
+        fetchAlertLogs()
+        fetchUnreadCount()
+      },
+    })
+  }
+
   useEffect(() => {
     fetchOrders()
     fetchSettings()
     fetchBotStatus()
+    fetchUnreadCount()
+
+    // Refresh unread count every 30 seconds
+    const unreadInterval = setInterval(() => {
+      fetchUnreadCount()
+    }, 30000)
+
+    return () => clearInterval(unreadInterval)
   }, [])
 
   // SignalR connection for real-time order updates
@@ -268,6 +359,63 @@ export default function App() {
     return () => {
       connection.stop().catch((err) => {
         console.error('Error stopping SignalR connection:', err)
+      })
+    }
+  }, [apiBase])
+
+  // SignalR connection for alerts
+  useEffect(() => {
+    const baseUrl = apiBase.replace('/api', '')
+    const alertConnection = new signalR.HubConnectionBuilder()
+      .withUrl(`${baseUrl}/hubs/alerts`)
+      .withAutomaticReconnect()
+      .build()
+
+    alertConnection
+      .start()
+      .then(() => {
+        console.log('SignalR Alerts Connected')
+        // Join all alerts group
+        alertConnection.invoke('JoinAllAlerts').catch((err) => {
+          console.error('Error joining alerts group:', err)
+        })
+      })
+      .catch((err) => {
+        console.error('SignalR Alerts Connection Error:', err)
+      })
+
+    // Listen for alerts
+    alertConnection.on('NewAlert', (alert) => {
+      console.log('New alert:', alert)
+      // Add alert to state with unique ID and timestamp
+      const newAlert = {
+        id: Date.now() + Math.random(),
+        ...alert,
+        timestamp: new Date(),
+      }
+      setAlerts((prev) => [newAlert, ...prev].slice(0, 10)) // Keep last 10 alerts
+
+      // Refresh unread count
+      fetchUnreadCount()
+
+      // Show browser notification if permission granted
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification(alert.title || 'New Alert', {
+          body: alert.message || JSON.stringify(alert),
+          icon: '/favicon.ico',
+        })
+      }
+    })
+
+    // Request notification permission on mount
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+
+    // Cleanup on unmount
+    return () => {
+      alertConnection.stop().catch((err) => {
+        console.error('Error stopping SignalR alerts connection:', err)
       })
     }
   }, [apiBase])
@@ -448,6 +596,377 @@ export default function App() {
     })
   }
 
+  const exportBackup = async () => {
+    setBackupLoading(true)
+    try {
+      const url = buildUrl(apiBase, 'SQLite/BackupExport')
+      const response = await fetch(url, {
+        method: 'GET',
+      })
+
+      if (!response.ok) {
+        throw new Error(`Export failed: ${response.statusText}`)
+      }
+
+      // Get filename from Content-Disposition header or use default
+      const contentDisposition = response.headers.get('Content-Disposition')
+      let filename = 'backup.json'
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i)
+        if (filenameMatch) {
+          filename = filenameMatch[1]
+        }
+      }
+
+      // Download file
+      const blob = await response.blob()
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(downloadUrl)
+    } catch (err) {
+      console.error('Export error:', err)
+      alert(`Export failed: ${err.message}`)
+    } finally {
+      setBackupLoading(false)
+    }
+  }
+
+  const importBackup = async () => {
+    if (backupImportMode === 'file' && !backupFile) {
+      alert('กรุณาเลือกไฟล์ JSON')
+      return
+    }
+    if (backupImportMode === 'text' && !backupJsonText.trim()) {
+      alert('กรุณาใส่ JSON text')
+      return
+    }
+
+    const confirmed = window.confirm(
+      `ยืนยัน Import backup? ${backupReplaceExisting ? '(จะแทนที่ข้อมูลเดิม)' : '(จะเพิ่มข้อมูลใหม่)'}`
+    )
+    if (!confirmed) return
+
+    setBackupLoading(true)
+    try {
+      const url = buildUrl(apiBase, 'SQLite/BackupImport')
+      const formData = new FormData()
+
+      if (backupImportMode === 'file') {
+        formData.append('BackupFile', backupFile)
+      } else {
+        // For text mode, send as BackupJson
+        formData.append('BackupJson', backupJsonText)
+        // Optionally create a file from text for BackupFile field
+        const blob = new Blob([backupJsonText], { type: 'application/json' })
+        const file = new File([blob], 'backup.json', { type: 'application/json' })
+        formData.append('BackupFile', file)
+      }
+
+      formData.append('ReplaceExisting', backupReplaceExisting)
+
+      const response = await fetch(url, {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.message || `Import failed: ${response.statusText}`)
+      }
+
+      alert('Import สำเร็จ! กำลัง reload ข้อมูล...')
+      // Reload all data
+      fetchSettings()
+      fetchOrders()
+      fetchBotStatus()
+
+      // Reset form
+      setBackupFile(null)
+      setBackupJsonText('')
+    } catch (err) {
+      console.error('Import error:', err)
+      alert(`Import failed: ${err.message}`)
+    } finally {
+      setBackupLoading(false)
+    }
+  }
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      if (file.type !== 'application/json' && !file.name.endsWith('.json')) {
+        alert('กรุณาเลือกไฟล์ JSON เท่านั้น')
+        return
+      }
+      setBackupFile(file)
+    }
+  }
+
+  // Calculate functions
+  const calculateSum1 = () => {
+    const num1 = Number(cal1)
+    const num2 = Number(cal2)
+    if (!cal1 || !cal2 || isNaN(num1) || isNaN(num2)) return '-'
+    const percent = ((num2 - num1) / num1) * 100
+    return `${percent >= 0 ? '+' : ''}${percent.toFixed(4)}%`
+  }
+
+  const calculateSum2 = () => {
+    const num1 = Number(cal1)
+    const num2 = Number(cal2)
+    if (!cal1 || !cal2 || isNaN(num1) || isNaN(num2)) return '-'
+    const percent = (num1 / num2) * 100
+    return `${percent.toFixed(4)}%`
+  }
+
+  const calculateSum3 = () => {
+    const num1 = Number(cal1)
+    const percent = Number(percentInput)
+    if (!cal1 || isNaN(num1) || !percentInput || isNaN(percent)) return { minus: '-', plus: '-' }
+    const minus = num1 - (num1 * percent) / 100
+    const plus = num1 + (num1 * percent) / 100
+    return {
+      minus: minus.toFixed(4),
+      plus: plus.toFixed(4),
+    }
+  }
+
+  const calculateSum4 = () => {
+    const num1 = Number(cal1)
+    const percent = Number(percentInput)
+    if (!cal1 || isNaN(num1) || !percentInput || isNaN(percent)) return '-'
+    const result = (num1 * percent) / 100
+    return result.toFixed(4)
+  }
+
+  const handleSetValueFromOrder = (value, target) => {
+    if (target === 'cal1') {
+      setCal1(String(value || ''))
+    } else if (target === 'cal2') {
+      setCal2(String(value || ''))
+    }
+  }
+
+  const removeAlert = (alertId) => {
+    setAlerts((prev) => prev.filter((alert) => alert.id !== alertId))
+  }
+
+  const clearAllAlerts = () => {
+    setAlerts([])
+  }
+
+  const renderCalculate = () => (
+    <section className="card">
+      <header>
+        <div>
+          <p className="eyebrow">Calculator</p>
+          <h3>Calculate Percentage</h3>
+        </div>
+      </header>
+      <div className="form-grid">
+        <label>
+          Cal 1
+          <input
+            type="number"
+            step="0.0001"
+            value={cal1}
+            onChange={(e) => setCal1(e.target.value)}
+            placeholder="Enter value"
+          />
+        </label>
+        <label>
+          Cal 2
+          <input
+            type="number"
+            step="0.0001"
+            value={cal2}
+            onChange={(e) => setCal2(e.target.value)}
+            placeholder="Enter value"
+          />
+        </label>
+      </div>
+
+      <div className="calculate-results">
+        <div className="result-item">
+          <span className="result-label">Sum 1 - Cal1 to Cal2 = ? %</span>
+          <span className="result-value">{calculateSum1()}</span>
+        </div>
+        <div className="result-item">
+          <span className="result-label">Sum 2 - Cal1 as % of Cal2 = ? %</span>
+          <span className="result-value">{calculateSum2()}</span>
+        </div>
+        <div className="result-item">
+          <label>
+            % (0-100)
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              max="100"
+              value={percentInput}
+              onChange={(e) => setPercentInput(e.target.value)}
+              placeholder="0-100"
+            />
+          </label>
+        </div>
+        <div className="result-item">
+          <span className="result-label">Sum 3 - Cal1 - % = ?</span>
+          <span className="result-value">{calculateSum3().minus}</span>
+        </div>
+        <div className="result-item">
+          <span className="result-label">Sum 3 - Cal1 + % = ?</span>
+          <span className="result-value">{calculateSum3().plus}</span>
+        </div>
+        <div className="result-item">
+          <span className="result-label">Sum 4 - % of Cal1 = ?</span>
+          <span className="result-value">{calculateSum4()}</span>
+        </div>
+      </div>
+    </section>
+  )
+
+  const renderAlertLogs = () => (
+    <section className="card alert-logs-card">
+      <header>
+        <div>
+          <p className="eyebrow">Alert Logs</p>
+          <h3>System Logs & Alerts</h3>
+        </div>
+        <div className="button-group">
+          <button className="secondary ghost" onClick={fetchAlertLogs} disabled={alertLogsLoading}>
+            {alertLogsLoading ? 'Loading...' : 'Refresh'}
+          </button>
+          <button className="danger ghost" onClick={clearLogs} title="Clear all logs">
+            🗑 Clear Logs
+          </button>
+        </div>
+      </header>
+
+      {/* Filters */}
+      <div className="alert-filters">
+        <div className="form-grid">
+          <label>
+            Type
+            <select
+              value={alertFilters.Type}
+              onChange={(e) => setAlertFilters((prev) => ({ ...prev, Type: e.target.value }))}
+            >
+              <option value="">All</option>
+              <option value="LOG">LOG</option>
+              <option value="DISCORD">DISCORD</option>
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+              <option value="START">START</option>
+              <option value="STOP">STOP</option>
+            </select>
+          </label>
+          <label>
+            Level
+            <select
+              value={alertFilters.Level}
+              onChange={(e) => setAlertFilters((prev) => ({ ...prev, Level: e.target.value }))}
+            >
+              <option value="">All</option>
+              <option value="Information">Information</option>
+              <option value="Warning">Warning</option>
+              <option value="Error">Error</option>
+            </select>
+          </label>
+          <label>
+            Read Status
+            <select
+              value={alertFilters.IsRead === null ? '' : alertFilters.IsRead ? 'read' : 'unread'}
+              onChange={(e) => {
+                const value = e.target.value
+                setAlertFilters((prev) => ({
+                  ...prev,
+                  IsRead: value === '' ? null : value === 'read',
+                }))
+              }}
+            >
+              <option value="">All</option>
+              <option value="unread">Unread</option>
+              <option value="read">Read</option>
+            </select>
+          </label>
+        </div>
+        <button className="primary" onClick={fetchAlertLogs} disabled={alertLogsLoading}>
+          Apply Filters
+        </button>
+      </div>
+
+      {/* Logs List */}
+      <div className="alert-logs-list">
+        {alertLogsLoading && <div className="state-block">กำลังโหลด logs...</div>}
+        {!alertLogsLoading && alertLogsError && (
+          <div className="state-block error">โหลด logs ไม่ได้: {prettify(alertLogsError)}</div>
+        )}
+        {!alertLogsLoading && !alertLogsError && alertLogs.length === 0 && (
+          <div className="state-block empty">ยังไม่มี logs</div>
+        )}
+        {!alertLogsLoading && !alertLogsError && alertLogs.length > 0 && (
+          <div className="alert-logs-items">
+            {alertLogs.map((log) => {
+              const levelClass = log.level?.toLowerCase() || 'info'
+              const typeClass = log.type?.toLowerCase() || 'log'
+              const isUnread = !log.isRead
+              return (
+                <article key={log.id} className={`alert-log-item ${isUnread ? 'unread' : ''} level-${levelClass}`}>
+                  <div className="alert-log-item__header">
+                    <div className="alert-log-item__meta">
+                      <span className={`alert-log-type type-${typeClass}`}>{log.type || 'LOG'}</span>
+                      <span className={`alert-log-level level-${levelClass}`}>{log.level || 'Info'}</span>
+                      {log.symbol && <span className="alert-log-symbol">{log.symbol}</span>}
+                      {log.configId && <span className="alert-log-config">Config #{log.configId}</span>}
+                    </div>
+                    <div className="alert-log-item__actions">
+                      {isUnread && (
+                        <button
+                          className="secondary ghost small"
+                          onClick={() => markAlertAsRead(log.id)}
+                          title="Mark as read"
+                        >
+                          ✓ Read
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="alert-log-item__content">
+                    <h4 className="alert-log-item__title">{log.title || 'No Title'}</h4>
+                    <p className="alert-log-item__message">{log.message || 'No message'}</p>
+                    {log.details && <p className="alert-log-item__details">{log.details}</p>}
+                    {log.fields && (
+                      <div className="alert-log-item__fields">
+                        {Object.entries(log.fields).map(([key, value]) => (
+                          <div key={key} className="field-item">
+                            <span className="field-key">{key}:</span>
+                            <span className="field-value">{String(value)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="alert-log-item__footer">
+                      <span className="alert-log-item__time">{formatDateTime(log.timestamp)}</span>
+                      {log.readAt && (
+                        <span className="alert-log-item__read-time">Read: {formatDateTime(log.readAt)}</span>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+
   const renderOrders = () => (
     <section className="card">
       <header>
@@ -526,6 +1045,34 @@ export default function App() {
                     <div>
                       <span className="label">Date Sell</span>
                       <span className="value">{formatDateTime(order?.dateSell)}</span>
+                    </div>
+                  </div>
+                  <div className="order-card__calc-buttons">
+                    <div className="calc-button-row">
+                      <button
+                        className="secondary ghost small"
+                        type="button"
+                        onClick={() => handleSetValueFromOrder(order?.priceBuy, 'cal1')}
+                        title="Set Price Buy to Cal1"
+                      >
+                        → Cal1
+                      </button>
+                      <button
+                        className="secondary ghost small"
+                        type="button"
+                        onClick={() => handleSetValueFromOrder(order?.priceWaitSell, 'cal2')}
+                        title="Set Wait Sell Price to Cal2"
+                      >
+                        → Cal2
+                      </button>
+                      <button
+                        className="secondary ghost small"
+                        type="button"
+                        onClick={() => handleSetValueFromOrder(order?.priceSellActual, 'cal2')}
+                        title="Set Sell Price to Cal2"
+                      >
+                        Sell→Cal2
+                      </button>
                     </div>
                   </div>
                   <div className="button-group order-card__actions">
@@ -650,6 +1197,95 @@ export default function App() {
     </section>
   )
 
+  const renderBackupCard = () => (
+    <section className="card">
+      <header>
+        <div>
+          <p className="eyebrow">Backup Data</p>
+          <h3>Export & Import</h3>
+        </div>
+      </header>
+
+      <div className="backup-section">
+        <div className="backup-export">
+          <h4>Export Backup</h4>
+          <p className="backup-description">ดาวน์โหลดข้อมูลทั้งหมดเป็นไฟล์ JSON</p>
+          <button className="primary" onClick={exportBackup} disabled={backupLoading}>
+            {backupLoading ? 'Exporting...' : '📥 Export'}
+          </button>
+        </div>
+
+        <div className="backup-divider"></div>
+
+        <div className="backup-import">
+          <h4>Import Backup</h4>
+          <p className="backup-description">นำเข้าข้อมูลจากไฟล์ JSON หรือ text</p>
+
+          <div className="backup-import-mode">
+            <label className="radio-label">
+              <input
+                type="radio"
+                name="importMode"
+                value="file"
+                checked={backupImportMode === 'file'}
+                onChange={(e) => setBackupImportMode(e.target.value)}
+              />
+              <span>Upload File</span>
+            </label>
+            <label className="radio-label">
+              <input
+                type="radio"
+                name="importMode"
+                value="text"
+                checked={backupImportMode === 'text'}
+                onChange={(e) => setBackupImportMode(e.target.value)}
+              />
+              <span>Paste JSON Text</span>
+            </label>
+          </div>
+
+          {backupImportMode === 'file' ? (
+            <label className="file-input-label">
+              <input
+                type="file"
+                accept=".json,application/json"
+                onChange={handleFileChange}
+                style={{ display: 'none' }}
+              />
+              <span className="file-input-button">
+                {backupFile ? `📄 ${backupFile.name}` : '📁 เลือกไฟล์ JSON'}
+              </span>
+            </label>
+          ) : (
+            <label>
+              JSON Text
+              <textarea
+                value={backupJsonText}
+                onChange={(e) => setBackupJsonText(e.target.value)}
+                placeholder="วาง JSON text ที่นี่..."
+                rows="6"
+                className="backup-textarea"
+              />
+            </label>
+          )}
+
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={backupReplaceExisting}
+              onChange={(e) => setBackupReplaceExisting(e.target.checked)}
+            />
+            <span>Replace Existing Data (แทนที่ข้อมูลเดิม)</span>
+          </label>
+
+          <button className="primary" onClick={importBackup} disabled={backupLoading}>
+            {backupLoading ? 'Importing...' : '📤 Import'}
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+
   const renderSettings = () => (
     <>
       <section className="card">
@@ -728,14 +1364,100 @@ export default function App() {
 
   return (
     <div className="app">
-      <main className="content">
-        {activeTab === 'orders' && (
-          <div className="tradingview-full-width">
-            <TradingViewWidget />
+      {/* Alert Notifications */}
+      <div className="alert-notifications">
+        {alerts.length > 0 && (
+          <div className="alert-notifications__header">
+            <span className="alert-count">Alerts ({alerts.length})</span>
+            <button className="secondary ghost small" onClick={clearAllAlerts}>
+              Clear All
+            </button>
           </div>
         )}
+        <div className="alert-list">
+          {alerts.map((alert) => {
+            const alertType = alert.type || alert.severity || 'info'
+            const alertMessage = alert.message || (typeof alert === 'string' ? alert : JSON.stringify(alert))
+            return (
+              <div key={alert.id} className={`alert-item alert-${alertType}`}>
+                <div className="alert-item__content">
+                  <div className="alert-item__header">
+                    <span className="alert-item__title">{alert.title || 'Alert'}</span>
+                    <button
+                      className="alert-item__close"
+                      onClick={() => removeAlert(alert.id)}
+                      aria-label="Close alert"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="alert-item__message">{alertMessage}</div>
+                  {alert.timestamp && (
+                    <div className="alert-item__time">
+                      {formatDateTime(alert.timestamp)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Top Right Controls */}
+      <div className="top-right-controls">
+        <button
+          className="top-control-btn"
+          onClick={() => {
+            setShowAlertLogs(!showAlertLogs)
+            if (!showAlertLogs) {
+              fetchAlertLogs()
+            }
+          }}
+          title="Alert Logs"
+        >
+          🔔
+          {unreadCount > 0 && <span className="unread-badge">{unreadCount}</span>}
+        </button>
+        <button className="top-control-btn" onClick={clearLogs} title="Clear All Logs">
+          🗑
+        </button>
+      </div>
+
+      <main className="content">
+        {showAlertLogs && renderAlertLogs()}
+        {activeTab === 'orders' && (
+          <>
+            {showChart ? (
+              <div className="tradingview-full-width">
+                <TradingViewWidget />
+              </div>
+            ) : (
+              renderCalculate()
+            )}
+            <div className="chart-menu-bar">
+              <button
+                className={showChart ? 'menu-btn active' : 'menu-btn'}
+                onClick={() => setShowChart(true)}
+              >
+                Chart
+              </button>
+              <button
+                className={!showChart ? 'menu-btn active' : 'menu-btn'}
+                onClick={() => setShowChart(false)}
+              >
+                Calculate
+              </button>
+            </div>
+          </>
+        )}
         {activeTab === 'orders' && renderOrders()}
-        {activeTab === 'bot' && renderBot()}
+        {activeTab === 'bot' && (
+          <>
+            {renderBot()}
+            {renderBackupCard()}
+          </>
+        )}
         {activeTab === 'settings' && renderSettings()}
       </main>
 
