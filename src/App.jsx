@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import * as signalR from '@microsoft/signalr'
 
 const tabs = [
   { key: 'orders', label: 'Orders', icon: '📦' },
@@ -235,11 +236,57 @@ export default function App() {
     fetchBotStatus()
   }, [])
 
+  // SignalR connection for real-time order updates
+  useEffect(() => {
+    const baseUrl = apiBase.replace('/api', '')
+    const connection = new signalR.HubConnectionBuilder()
+      .withUrl(`${baseUrl}/hubs/orders`)
+      .withAutomaticReconnect()
+      .build()
+
+    connection
+      .start()
+      .then(() => {
+        console.log('SignalR Connected')
+        // Join group for config ID "1" (can be made dynamic based on selectedSettingId)
+        connection.invoke('JoinOrderGroup', '1').catch((err) => {
+          console.error('Error joining order group:', err)
+        })
+      })
+      .catch((err) => {
+        console.error('SignalR Connection Error:', err)
+      })
+
+    // Listen for order updates
+    connection.on('OrderUpdated', (data) => {
+      console.log('Order updated:', data)
+      // Reload/update UI
+      fetchOrders('ordersSignalR')
+    })
+
+    // Cleanup on unmount
+    return () => {
+      connection.stop().catch((err) => {
+        console.error('Error stopping SignalR connection:', err)
+      })
+    }
+  }, [apiBase])
+
   const formatDateTime = (value) => {
     if (!value) return '-'
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return value
-    return date.toLocaleString()
+    // Format with Bangkok timezone (+7)
+    return new Intl.DateTimeFormat('th-TH', {
+      timeZone: 'Asia/Bangkok',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(date)
   }
 
   const normalizeSettingRecord = (record) => {
