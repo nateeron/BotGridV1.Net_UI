@@ -71,6 +71,40 @@ const buildUrl = (base, endpoint) => {
   return `${cleanBase}/${cleanEndpoint}`
 }
 
+const safeJSONParse = (value, fallback) => {
+  try {
+    return value ? JSON.parse(value) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+const loadState = (key, fallback) => {
+  if (typeof window === 'undefined') return fallback
+  const stored = sessionStorage.getItem(key)
+  if (stored === null) return fallback
+  return safeJSONParse(stored, fallback)
+}
+
+const loadPrimitiveState = (key, fallback) => {
+  if (typeof window === 'undefined') return fallback
+  const stored = sessionStorage.getItem(key)
+  if (stored === null) return fallback
+  try {
+    return JSON.parse(stored)
+  } catch {
+    return stored
+  }
+}
+
+const loadObjectState = (key, fallback) => {
+  const stored = loadState(key, null)
+  if (stored && typeof stored === 'object') {
+    return { ...fallback, ...stored }
+  }
+  return fallback
+}
+
 const trimZeros = (value, decimals = 8) => {
   if (value === null || value === undefined || value === '') return '-'
   const num = Number(value)
@@ -79,14 +113,41 @@ const trimZeros = (value, decimals = 8) => {
   return fixed.replace(/\.?0+$/, '')
 }
 
+const defaultTradeForm = {
+  ConfigId: 1,
+  Symbol: 'BTCUSDT',
+  Side: 'BUY',
+  OrderType: 'MARKET',
+  Price: '',
+  CoinQuantity: '',
+  UsdAmount: '',
+  PortfolioPercent: '',
+  TimeInForce: 'GTC',
+}
+
+const defaultBuyNowForm = {
+  ConfigId: 1,
+  BuyAmountUSD: '',
+  Symbol: '',
+}
+
+const defaultFilledOrdersForm = {
+  Symbol: '',
+  OrderSide: '',
+  StartTime: '',
+  Limit: 50,
+}
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState('orders')
+  const [activeTab, setActiveTab] = useState(() => loadPrimitiveState('activeTab', 'orders'))
   const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
   //const [apiBase, setApiBase] = useState('http://localhost:5081/api')
   const [loadingKey, setLoadingKey] = useState(null)
   const [orders, setOrders] = useState([])
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError] = useState(null)
+  const [orderFilter, setOrderFilter] = useState(() => loadPrimitiveState('orderFilter', 'all')) // 'all', 'SOLD', 'WAITING_SELL'
+  const [buyPauseStatus, setBuyPauseStatus] = useState({ isPaused: false, loading: false, message: '' })
   const [settings, setSettings] = useState([])
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [settingsError, setSettingsError] = useState(null)
@@ -100,21 +161,11 @@ export default function App() {
   const [orderModalData, setOrderModalData] = useState(null)
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
   const [sellModalData, setSellModalData] = useState(null)
-  const [viewMode, setViewMode] = useState('chart') // 'chart', 'calculate', 'trade'
-  const [cal1, setCal1] = useState('')
-  const [cal2, setCal2] = useState('')
-  const [percentInput, setPercentInput] = useState('')
-  const [tradeForm, setTradeForm] = useState({
-    ConfigId: 1,
-    Symbol: 'BTCUSDT',
-    Side: 'BUY',
-    OrderType: 'MARKET',
-    Price: '',
-    CoinQuantity: '',
-    UsdAmount: '',
-    PortfolioPercent: '',
-    TimeInForce: 'GTC',
-  })
+  const [viewMode, setViewMode] = useState(() => loadPrimitiveState('viewMode', 'chart')) // 'chart', 'calculate', 'trade'
+  const [cal1, setCal1] = useState(() => loadPrimitiveState('cal1', ''))
+  const [cal2, setCal2] = useState(() => loadPrimitiveState('cal2', ''))
+  const [percentInput, setPercentInput] = useState(() => loadPrimitiveState('percentInput', ''))
+  const [tradeForm, setTradeForm] = useState(() => loadObjectState('tradeForm', defaultTradeForm))
   const [tradeLoading, setTradeLoading] = useState(false)
   const [isTradeVerificationOpen, setIsTradeVerificationOpen] = useState(false)
   const [verificationKey, setVerificationKey] = useState('')
@@ -129,17 +180,16 @@ export default function App() {
   const [isBuyNowFormOpen, setIsBuyNowFormOpen] = useState(false)
   const [buyNowVerificationKey, setBuyNowVerificationKey] = useState('')
   const [buyNowVerificationInput, setBuyNowVerificationInput] = useState('')
-  const [buyNowForm, setBuyNowForm] = useState({
-    ConfigId: 1,
-    BuyAmountUSD: '',
-    Symbol: '',
-  })
+  const [buyNowForm, setBuyNowForm] = useState(() => loadObjectState('buyNowForm', defaultBuyNowForm))
   const [buyNowLoading, setBuyNowLoading] = useState(false)
   const [spotReport, setSpotReport] = useState(null)
   const [spotReportLoading, setSpotReportLoading] = useState(false)
   const [spotReportError, setSpotReportError] = useState(null)
-  const [reportConfigId, setReportConfigId] = useState(null)
-  const [reportPeriod, setReportPeriod] = useState('1M')
+  const [reportConfigId, setReportConfigId] = useState(() => {
+    const stored = loadPrimitiveState('reportConfigId', null)
+    return stored !== null ? Number(stored) : null
+  })
+  const [reportPeriod, setReportPeriod] = useState(() => loadPrimitiveState('reportPeriod', '1M'))
   const [allCoinsData, setAllCoinsData] = useState({
     coins: [],
     totalValueUSD: 0,
@@ -154,12 +204,9 @@ export default function App() {
   })
   const [filledOrdersLoading, setFilledOrdersLoading] = useState(false)
   const [filledOrdersError, setFilledOrdersError] = useState(null)
-  const [filledOrdersForm, setFilledOrdersForm] = useState({
-    Symbol: '',
-    OrderSide: '',
-    StartTime: '',
-    Limit: 50,
-  })
+  const [filledOrdersForm, setFilledOrdersForm] = useState(() =>
+    loadObjectState('filledOrdersForm', defaultFilledOrdersForm)
+  )
   const [serverTimeData, setServerTimeData] = useState(null)
   const [serverTimeLoading, setServerTimeLoading] = useState(false)
   const [serverTimeError, setServerTimeError] = useState(null)
@@ -254,6 +301,50 @@ export default function App() {
       })
     } finally {
       setOrdersLoading(false)
+    }
+  }
+
+  const fetchBuyPauseStatus = async () => {
+    setBuyPauseStatus(prev => ({ ...prev, loading: true }))
+    try {
+      await runRequest('buyPauseStatus', 'BotWorker/GetBuyPauseStatus', {
+        method: 'POST',
+        payload: {},
+        onSuccess: (payload) => {
+          setBuyPauseStatus({
+            isPaused: payload?.isPaused ?? false,
+            loading: false,
+            message: payload?.message ?? '',
+          })
+        },
+        onError: (err) => {
+          setBuyPauseStatus(prev => ({ ...prev, loading: false }))
+        },
+      })
+    } catch (err) {
+      setBuyPauseStatus(prev => ({ ...prev, loading: false }))
+    }
+  }
+
+  const setBuyPauseState = async (pause) => {
+    setBuyPauseStatus(prev => ({ ...prev, loading: true }))
+    try {
+      await runRequest('buyPauseState', 'BotWorker/SetBuyPauseState', {
+        method: 'POST',
+        payload: { pause },
+        onSuccess: (payload) => {
+          setBuyPauseStatus({
+            isPaused: payload?.isPaused ?? pause,
+            loading: false,
+            message: payload?.message ?? '',
+          })
+        },
+        onError: (err) => {
+          setBuyPauseStatus(prev => ({ ...prev, loading: false }))
+        },
+      })
+    } catch (err) {
+      setBuyPauseStatus(prev => ({ ...prev, loading: false }))
     }
   }
 
@@ -518,6 +609,60 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('activeTab', activeTab)
+  }, [activeTab])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('viewMode', viewMode)
+  }, [viewMode])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('cal1', cal1)
+  }, [cal1])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('cal2', cal2)
+  }, [cal2])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('percentInput', percentInput)
+  }, [percentInput])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (reportConfigId !== null && reportConfigId !== undefined) {
+      sessionStorage.setItem('reportConfigId', String(reportConfigId))
+    } else {
+      sessionStorage.removeItem('reportConfigId')
+    }
+  }, [reportConfigId])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('reportPeriod', reportPeriod)
+  }, [reportPeriod])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('tradeForm', JSON.stringify(tradeForm))
+  }, [tradeForm])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('buyNowForm', JSON.stringify(buyNowForm))
+  }, [buyNowForm])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('filledOrdersForm', JSON.stringify(filledOrdersForm))
+  }, [filledOrdersForm])
+
+  useEffect(() => {
     if (!reportConfigId) return
     fetchAllCoins()
   }, [reportConfigId])
@@ -530,6 +675,12 @@ export default function App() {
   useEffect(() => {
     if (activeTab === 'binaceOrders') {
       fetchFilledOrders()
+    }
+  }, [activeTab])
+
+  useEffect(() => {
+    if (activeTab === 'orders') {
+      fetchBuyPauseStatus()
     }
   }, [activeTab])
 
@@ -851,11 +1002,10 @@ export default function App() {
           // Reload orders to see the new order
           fetchOrders()
           // Reset form
-          setBuyNowForm({
-            ConfigId: 1,
-            BuyAmountUSD: '',
-            Symbol: '',
-          })
+          setBuyNowForm((prev) => ({
+            ...defaultBuyNowForm,
+            ConfigId: prev?.ConfigId ?? defaultBuyNowForm.ConfigId,
+          }))
         },
         onError: (err) => {
           alert(`Buy Now failed: ${err.message || JSON.stringify(err)}`)
@@ -1128,17 +1278,10 @@ export default function App() {
           // Reload orders to see the new trade
           fetchOrders()
           // Reset form
-          setTradeForm({
-            ConfigId: 1,
-            Symbol: 'BTCUSDT',
-            Side: 'BUY',
-            OrderType: 'MARKET',
-            Price: '',
-            CoinQuantity: '',
-            UsdAmount: '',
-            PortfolioPercent: '',
-            TimeInForce: 'GTC',
-          })
+          setTradeForm((prev) => ({
+            ...defaultTradeForm,
+            ConfigId: prev?.ConfigId ?? defaultTradeForm.ConfigId,
+          }))
         },
         onError: (err) => {
           alert(`Trade failed: ${err.message || JSON.stringify(err)}`)
@@ -1565,6 +1708,11 @@ export default function App() {
     </section>
   )
 
+  const filteredOrders = useMemo(() => {
+    if (orderFilter === 'all') return orders
+    return orders.filter((order) => order?.status === orderFilter)
+  }, [orders, orderFilter])
+
   const renderOrders = () => (
     <section className="card">
       <header>
@@ -1577,6 +1725,83 @@ export default function App() {
         </button>
       </header>
 
+      {/* Menu Bar with Filters and BuyPause Controls */}
+      <div className="order-menu-bar" style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        padding: '1rem',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+        gap: '1rem',
+        flexWrap: 'wrap'
+      }}>
+        {/* Filter Buttons */}
+        <div className="filter-buttons" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <span style={{ marginRight: '0.5rem', opacity: 0.7 }}>Filter:</span>
+          <button
+            className={`secondary ${orderFilter === 'all' ? '' : 'ghost'}`}
+            onClick={() => {
+              setOrderFilter('all')
+              sessionStorage.setItem('orderFilter', JSON.stringify('all'))
+            }}
+            style={{ fontSize: '0.875rem' }}
+          >
+            All
+          </button>
+          <button
+            className={`secondary ${orderFilter === 'SOLD' ? '' : 'ghost'}`}
+            onClick={() => {
+              setOrderFilter('SOLD')
+              sessionStorage.setItem('orderFilter', JSON.stringify('SOLD'))
+            }}
+            style={{ fontSize: '0.875rem' }}
+          >
+            SOLD
+          </button>
+          <button
+            className={`secondary ${orderFilter === 'WAITING_SELL' ? '' : 'ghost'}`}
+            onClick={() => {
+              setOrderFilter('WAITING_SELL')
+              sessionStorage.setItem('orderFilter', JSON.stringify('WAITING_SELL'))
+            }}
+            style={{ fontSize: '0.875rem' }}
+          >
+            WAITING_SELL
+          </button>
+        </div>
+
+        {/* BuyPause Status and Control */}
+        <div className="buy-pause-control" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.875rem', opacity: 0.7 }}>BuyPause:</span>
+            <span
+              style={{
+                width: '12px',
+                height: '12px',
+                borderRadius: '50%',
+                backgroundColor: buyPauseStatus.isPaused ? '#ff4444' : '#44ff44',
+                display: 'inline-block',
+                boxShadow: buyPauseStatus.isPaused 
+                  ? '0 0 8px rgba(255, 68, 68, 0.6)' 
+                  : '0 0 8px rgba(68, 255, 68, 0.6)',
+              }}
+              title={buyPauseStatus.message || (buyPauseStatus.isPaused ? 'Buy logic is paused' : 'Buy logic is active')}
+            />
+            <span style={{ fontSize: '0.875rem', opacity: 0.9 }}>
+              {buyPauseStatus.isPaused ? 'Paused' : 'Active'}
+            </span>
+          </div>
+          <button
+            className={buyPauseStatus.isPaused ? 'primary' : 'secondary'}
+            onClick={() => setBuyPauseState(!buyPauseStatus.isPaused)}
+            disabled={buyPauseStatus.loading}
+            style={{ fontSize: '0.875rem', minWidth: '80px' }}
+          >
+            {buyPauseStatus.loading ? '...' : buyPauseStatus.isPaused ? 'Resume' : 'Pause'}
+          </button>
+        </div>
+      </div>
+
       <div className="order-list">
         {ordersLoading && <div className="state-block">กำลังโหลดคำสั่งซื้อ...</div>}
 
@@ -1586,9 +1811,13 @@ export default function App() {
           <div className="state-block empty">ยังไม่มีคำสั่งซื้อ</div>
         )}
 
-        {!ordersLoading && !ordersError && orders.length > 0 && (
+        {!ordersLoading && !ordersError && orders.length > 0 && filteredOrders.length === 0 && (
+          <div className="state-block empty">ไม่มีคำสั่งซื้อที่ตรงกับตัวกรอง</div>
+        )}
+
+        {!ordersLoading && !ordersError && filteredOrders.length > 0 && (
           <div className="order-grid">
-            {orders.map((order) => {
+            {filteredOrders.map((order) => {
               const profit = Number(order?.profitLoss ?? 0)
               const isGain = profit >= 0
               return (
