@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>V9 Binance Realtime + Infinite + Trades Full</title>
+
+<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+
+<style>
+    body { margin: 0; background: #111; }
+    #chart { width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+
+<div id="chart"></div>
+
+<script type="module">
+
+// ===============================================
+// CONFIG
+// ===============================================
+const SYMBOL = "XRPUSDT";
+const INTERVAL = "1m";
+
+// buffer candlestick data
+let allData = [];
+let earliestTimeMs = null;
+let isLoadingMore = false;
+
+// เก็บทุกเส้นที่ต้องลบ (TP, SL, Entry, Zone, Connect Line)
+let allPriceLines = [];
+let allSeriesOverlays = [];
+
+
+// ===============================================
+// UTIL
+// ===============================================
+function normalizeTimeSec(t) {
+    t = Number(t);
+    if (t > 1e12) return Math.floor(t / 1000); // ms → sec
+    return Math.floor(t);
+}
+
+function toCandle(raw) {
+    if (!raw) return null;
+
+    const t = raw[0];
+    const o = raw[1];
+    const h = raw[2];
+    const l = raw[3];
+    const c = raw[4];
+
+    if ([t, o, h, l, c].some(v => v == null || isNaN(v))) return null;
+
+    return {
+        time: Math.floor(t / 1000),
+        open: Number(o),
+        high: Number(h),
+        low: Number(l),
+        close: Number(c),
+    };
+}
+
+async function fetchKlines(params) {
+    const url = new URL("https://api.binance.com/api/v3/klines");
+    url.searchParams.set("symbol", SYMBOL);
+    url.searchParams.set("interval", INTERVAL);
+    url.searchParams.set("limit", "1000");
+
+    if (params.endTime) url.searchParams.set("endTime", String(params.endTime));
+
+    const res = await fetch(url);
+    const json = await res.json();
+
+    return Array.isArray(json) ? json : [];
+}
+
+
+// ===============================================
+// V9 TRADE DECORATIONS ENGINE
+// ===============================================
+function applyTradeDecorations(candleSeries, mainChart, trades) {
+    // ล้างทั้งหมด
+    allPriceLines.forEach(line => {
+        try { candleSeries.removePriceLine(line); } catch {}
+    });
+    allPriceLines = [];
+
+    allSeriesOverlays.forEach(s => {
+        try { mainChart.removeSeries(s); } catch {}
+    });
+    allSeriesOverlays = [];
+
+    const markers = [];
+
+    for (const t of trades) {
+
+        const entryTimeSec = normalizeTimeSec(t.time);
+        const entryPrice = Number(t.price);
+        const side = String(t.side || "").toUpperCase();
+
+        if (!entryTimeSec || isNaN(entryPrice)) continue;
+
+        // ---------------------
+        // 1) Entry Marker
+        // ---------------------
+        markers.push({
+            time: entryTimeSec,
+            position: side === "BUY" ? "belowBar" : "aboveBar",
+            color: side === "BUY" ? "#26a69a" : "#ef5350",
+            shape: side === "BUY" ? "arrowUp" : "arrowDown",
+            text: `${side} ${entryPrice}`,
+        });
+
+        // ---------------------
+        // 2) Entry Horizontal Line
+        // ---------------------
+        const entryLine = candleSeries.createPriceLine({
+            price: entryPrice,
+            color: side === "BUY" ? "#26a69a" : "#ef5350",
+            lineWidth: 2,
+            lineStyle: 0,
+            axisLabelVisible: true,
+            title: `${side} ${entryPrice}`,
+        });
+        allPriceLines.push(entryLine);
+
+        // ---------------------
+        // 3) TP + SL Lines
+        // ---------------------
+        if (t.tp != null) {
+            const tpLine = candleSeries.createPriceLine({
+                price: Number(t.tp),
+                color: "#00ff00",
+                lineWidth: 1,
+                lineStyle: 2,
+                axisLabelVisible: true,
+                title: `TP`,
+            });
+            allPriceLines.push(tpLine);
+        }
+
+        if (t.sl != null) {
+            const slLine = candleSeries.createPriceLine({
+                price: Number(t.sl),
+                color: "#ff4444",
+                lineWidth: 1,
+                lineStyle: 2,
+                axisLabelVisible: true,
+                title: `SL`,
+            });
+            allPriceLines.push(slLine);
+        }
+
+        // ---------------------
+        // 4) TP/SL Zone (Rectangle-like)
+        // ---------------------
+        if (t.tp != null && t.sl != null) {
+            const high = Math.max(t.tp, t.sl);
+            const low = Math.min(t.tp, t.sl);
+
+            const zoneSeries = mainChart.addLineSeries({
+                color: "rgba(0, 255, 0, 0.05)",
+                lineWidth: 0,
+                priceLineVisible: false,
+            });
+
+            const entry_pt = { time: entryTimeSec, value: entryPrice };
+            const tp_pt = { time: entryTimeSec + 60, value: high };
+            const sl_pt = { time: entryTimeSec + 60, value: low };
+
+            zoneSeries.setData([ entry_pt, tp_pt ]);
+            allSeriesOverlays.push(zoneSeries);
+
+            const zone2 = mainChart.addLineSeries({
+                color: "rgba(255, 0, 0, 0.05)",
+                lineWidth: 0,
+                priceLineVisible: false,
+            });
+            zone2.setData([ entry_pt, sl_pt ]);
+            allSeriesOverlays.push(zone2);
+        }
+
+        // ---------------------
+        // 5) Exit Marker + PnL + Line Entry → Exit
+        // ---------------------
+        if (t.exitTime != null && t.exitPrice != null) {
+            const exitTimeSec = normalizeTimeSec(t.exitTime);
+            const exitPrice = Number(t.exitPrice);
+
+            // PnL
+            let pnlPct = side === "BUY"
+                ? ((exitPrice - entryPrice) / entryPrice) * 100
+                : ((entryPrice - exitPrice) / entryPrice) * 100;
+
+            const pnlText = `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`;
+
+            markers.push({
+                time: exitTimeSec,
+                position: "aboveBar",
+                color: pnlPct >= 0 ? "#00ff00" : "#ff4444",
+                shape: "circle",
+                text: `PNL ${pnlText}`,
+            });
+
+            // Line connect entry -> exit
+            const connectSeries = mainChart.addLineSeries({
+                color: pnlPct >= 0 ? "#00ff00" : "#ff4444",
+                lineWidth: 2,
+            });
+
+            connectSeries.setData([
+                { time: entryTimeSec, value: entryPrice },
+                { time: exitTimeSec, value: exitPrice },
+            ]);
+
+            allSeriesOverlays.push(connectSeries);
+        }
+
+    }
+
+    candleSeries.setMarkers(markers);
+}
+
+
+// ===============================================
+// MAIN CHART + DATA ENGINE
+// ===============================================
+async function main() {
+
+    const chart = LightweightCharts.createChart(document.getElementById("chart"), {
+        layout: { background: { color: "#111" }, textColor: "#DDD" },
+        grid: { vertLines: { color: "#222" }, horzLines: { color: "#222" } },
+        timeScale: { timeVisible: true },
+    });
+
+    const candleSeries = chart.addCandlestickSeries();
+
+
+    // ---------- Load Initial ----------
+    async function loadInitial() {
+        const json = await fetchKlines({});
+        const mapped = json.map(toCandle).filter(c => c != null);
+
+        mapped.sort((a, b) => a.time - b.time);
+
+        allData = mapped;
+        earliestTimeMs = allData[0].time * 1000;
+
+        candleSeries.setData(allData);
+    }
+    await loadInitial();
+
+    // ---------- Infinite Scroll ----------
+    async function loadMoreHistory(range) {
+        if (!range || isLoadingMore) return;
+        if (range.from >= 5) return;
+
+        isLoadingMore = true;
+        try {
+            const endTime = earliestTimeMs - 1;
+            const json = await fetchKlines({ endTime });
+            const more = json.map(toCandle).filter(c => c != null);
+
+            if (more.length) {
+                more.sort((a,b)=>a.time-b.time);
+
+                const olderOnly = more.filter(m => m.time < allData[0].time);
+                if (olderOnly.length) {
+                    allData = [...olderOnly, ...allData];
+                    earliestTimeMs = allData[0].time * 1000;
+
+                    candleSeries.setData(allData);
+                }
+            }
+        } finally {
+            isLoadingMore = false;
+        }
+    }
+
+    chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        loadMoreHistory(range);
+    });
+
+
+    // ---------- Realtime WS ----------
+    const ws = new WebSocket(`wss://stream.binance.com:9443/ws/${SYMBOL.toLowerCase()}@kline_${INTERVAL}`);
+    let smoothPrice = null;
+
+    ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+        const k = msg.k;
+
+        const tSec = k.t / 1000;
+        const candle = {
+            time: tSec,
+            open: Number(k.o),
+            high: Number(k.h),
+            low: Number(k.l),
+            close: Number(k.c),
+        };
+
+        if (smoothPrice == null) smoothPrice = candle.close;
+        smoothPrice = smoothPrice * 0.6 + candle.close * 0.4;
+        candle.close = smoothPrice;
+
+        const last = allData.at(-1);
+        if (last && candle.time === last.time) {
+            allData[allData.length - 1] = candle;
+        } else if (!last || candle.time > last.time) {
+            allData.push(candle);
+        }
+
+        candleSeries.update(candle);
+    };
+
+
+    // ============================================
+    // DEMO TRADES (คุณเปลี่ยนเป็น data จริงได้)
+    // ============================================
+    const trades = [
+        {
+            id: "T1",
+            time: Date.now() - 3600_000,
+            price: 2.05,
+            side: "BUY",
+            tp: 2.12,
+            sl: 2.00,
+            exitTime: Date.now() - 1500_000,
+            exitPrice: 2.11,
+        },
+        {
+            id: "T2",
+            time: Date.now() - 1800_000,
+            price: 2.09,
+            side: "SELL",
+            tp: 2.03,
+            sl: 2.12,
+            exitTime: Date.now() - 300_000,
+            exitPrice: 2.07,
+        }
+    ];
+
+    // plot ทุกอย่างใน V9
+    applyTradeDecorations(candleSeries, chart, trades);
+
+    // ============================================
+    // FUNCTION: Plot Horizontal Lines from List
+    // ============================================
+    /**
+     * Plot horizontal lines from a list of { timestamp, price, side, lineStyle? }
+     * Each line will be 60 minutes long
+     * Color: BUY = blue, SELL = pink
+     * Line Style: 'solid' or 0 = solid, 'dotted' or 1 = dotted, 'dashed' or 2 = dashed
+     * @param {Array} linesData - Array of { timestamp, price, side, lineStyle? } objects
+     * @param {Object} options - Optional default options { defaultLineStyle?: number|string }
+     */
+    function plotHorizontalLines(linesData, options = {}) {
+        if (!Array.isArray(linesData) || linesData.length === 0) {
+            console.warn('plotHorizontalLines: Invalid or empty data');
+            return;
+        }
+
+        // Default line style: dashed (2)
+        const defaultLineStyle = options.defaultLineStyle ?? 2;
+
+        // Helper function to convert lineStyle to number
+        function parseLineStyle(style) {
+            if (style == null) return defaultLineStyle;
+            
+            if (typeof style === 'number') {
+                return Math.max(0, Math.min(2, Math.floor(style))); // Clamp to 0-2
+            }
+            
+            if (typeof style === 'string') {
+                const styleLower = style.toLowerCase();
+                if (styleLower === 'solid') return 0;
+                if (styleLower === 'dotted') return 1;
+                if (styleLower === 'dashed') return 2;
+                // Try to parse as number
+                const num = parseInt(style, 10);
+                if (!isNaN(num)) return Math.max(0, Math.min(2, num));
+            }
+            
+            return defaultLineStyle;
+        }
+
+        linesData.forEach((line, index) => {
+            const { timestamp, price, side, lineStyle } = line;
+            
+            if (!timestamp || price == null) {
+                console.warn(`plotHorizontalLines: Invalid data at index ${index}`, line);
+                return;
+            }
+
+            // Convert timestamp to seconds
+            const startTimeSec = normalizeTimeSec(timestamp);
+            const endTimeSec = startTimeSec + (60 * 60); // 60 minutes later
+
+            // Determine color based on side
+            const sideUpper = String(side || '').toUpperCase();
+            const lineColor = sideUpper === 'BUY' ? '#00aaff' : '#ff88cc'; // Blue for BUY, Pink for SELL
+
+            // Parse line style
+            const parsedLineStyle = parseLineStyle(lineStyle);
+
+            // Create horizontal line series
+            const lineSeries = chart.addLineSeries({
+                color: lineColor,
+                lineWidth: 2,
+                lineStyle: parsedLineStyle, // 0=solid, 1=dotted, 2=dashed
+                priceLineVisible: false,
+            });
+
+            // Set data points: start and end at same price level
+            lineSeries.setData([
+                { time: startTimeSec, value: Number(price) },
+                { time: endTimeSec, value: Number(price) },
+            ]);
+
+            // Add to overlays for cleanup if needed
+            allSeriesOverlays.push(lineSeries);
+        });
+
+        console.log(`Plotted ${linesData.length} horizontal lines`);
+    }
+
+    // ============================================
+    // GENERATE 100 RANDOM LINES DATA
+    // ============================================
+    function generateRandomLinesData(count = 100) {
+        const lines = [];
+        
+        // Start date: 1/11/25 00:00:00 (Bangkok time UTC+7)
+        const startDate = new Date('2025-11-01T00:00:00+07:00');
+        const startTimeMs = startDate.getTime();
+        
+        // End date: Current time
+        const endTimeMs = Date.now();
+        
+        // Price range: 2.05 - 2.31
+        const minPrice = 2.05;
+        const maxPrice = 2.31;
+
+        for (let i = 0; i < count; i++) {
+            // Random timestamp between start and end
+            const randomTimeMs = startTimeMs + Math.random() * (endTimeMs - startTimeMs);
+            
+            // Random price between min and max
+            const randomPrice = minPrice + Math.random() * (maxPrice - minPrice);
+            
+            // Random side: BUY or SELL
+            const randomSide = Math.random() < 0.5 ? 'BUY' : 'SELL';
+            
+            // Random line style: solid (0), dotted (1), or dashed (2)
+            const lineStyles = ['solid', 'dotted', 'dashed'];
+            const randomLineStyle = lineStyles[Math.floor(Math.random() * lineStyles.length)];
+            
+            lines.push({
+                timestamp: randomTimeMs,
+                price: parseFloat(randomPrice.toFixed(4)),
+                side: randomSide,
+                lineStyle: randomLineStyle
+            });
+        }
+
+        // Sort by timestamp
+        lines.sort((a, b) => a.timestamp - b.timestamp);
+
+        return lines;
+    }
+
+    // Generate and plot 100 random lines
+    const randomLinesData = generateRandomLinesData(100);
+    plotHorizontalLines(randomLinesData);
+
+    // ============================================
+    // PLOT HORIZONTAL LINE: 2.21 from 26/11/25 01:43:00 for 5 minutes
+    // ============================================
+    // Convert date: 26/11/25 01:43:00 (local time Bangkok +7)
+    // Format: November 26, 2025 01:43:00 (Bangkok time)
+    // Note: If the date is in Bangkok time, we need to subtract 7 hours to get UTC
+    // But lightweight-charts uses UTC timestamps, so we'll use the local time directly
+    const startDate = new Date('2025-11-26T01:43:00+07:00'); // Bangkok time (UTC+7)
+    const startTimeSec = Math.floor(startDate.getTime() / 1000);
+    const endTimeSec = startTimeSec + (5 * 60); // 5 minutes later (01:48:00)
+    const priceLevel = 2.21;
+
+    // Create horizontal line series
+    const horizontalLineSeries = chart.addLineSeries({
+        color: "#ffff00", // Yellow color
+        lineWidth: 2,
+        lineStyle: 0, // Solid line
+        priceLineVisible: false,
+    });
+
+    // Set data points: start and end at same price level
+    horizontalLineSeries.setData([
+        { time: startTimeSec, value: priceLevel },
+        { time: endTimeSec, value: priceLevel },
+    ]);
+
+    // Add to overlays for cleanup if needed
+    allSeriesOverlays.push(horizontalLineSeries);
+
+    console.log(`Plot horizontal line at ${priceLevel} from ${new Date(startTimeSec * 1000).toISOString()} to ${new Date(endTimeSec * 1000).toISOString()}`);
+}
+
+main();
+
+</script>
+</body>
+</html>
