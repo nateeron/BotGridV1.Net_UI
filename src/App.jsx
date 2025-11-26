@@ -340,6 +340,11 @@ export default function App() {
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError] = useState(null)
   const [orderFilter, setOrderFilter] = useState(() => loadPrimitiveState('orderFilter', 'all')) // 'all', 'SOLD', 'WAITING_SELL'
+  const [orderViewMode, setOrderViewMode] = useState(() => loadPrimitiveState('orderViewMode', 'card')) // 'card' or 'table'
+  const [ordersSort, setOrdersSort] = useState({
+    field: 'dateBuy',
+    direction: 'desc',
+  })
   const [buyPauseStatus, setBuyPauseStatus] = useState({ isPaused: false, loading: false, message: '' })
   const [settings, setSettings] = useState([])
   const [settingsLoading, setSettingsLoading] = useState(false)
@@ -956,6 +961,11 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
+    sessionStorage.setItem('orderViewMode', orderViewMode)
+  }, [orderViewMode])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
     sessionStorage.setItem('tradeLineSettings', JSON.stringify(tradeLineSettings))
   }, [tradeLineSettings])
 
@@ -1417,6 +1427,12 @@ export default function App() {
       filledOrdersSort.field === field && filledOrdersSort.direction === 'asc' ? 'desc' : 'asc'
     setFilledOrdersSort({ field, direction })
     setFilledOrders(sortFilledOrders(filledOrders, field, direction))
+  }
+
+  const handleOrdersSort = (field) => {
+    const direction =
+      ordersSort.field === field && ordersSort.direction === 'asc' ? 'desc' : 'asc'
+    setOrdersSort({ field, direction })
   }
 
   useEffect(() => {
@@ -2302,13 +2318,15 @@ export default function App() {
 
     // Plot NextSell (WaitSellPrice from WAITING_SELL orders)
     if (buttons.toggleNextSell && lines.nextSell?.visible) {
-      // Find the most recent WAITING_SELL order
-      const sortedWaitSellOrders = [...waitSellOrders].sort((a, b) => {
-        const timeA = parseTimestamp(a.dateBuy ?? a.createTime)
-        const timeB = parseTimestamp(b.dateBuy ?? b.createTime)
-        return (timeB || 0) - (timeA || 0)
-      })
-      const lastWaitSellOrder = sortedWaitSellOrders[0]
+      // Find the WAITING_SELL order with minimum Wait Sell Price
+      const sortedWaitSellOrders = [...waitSellOrders]
+        .filter((o) => Number(o.priceWaitSell ?? 0) > 0)
+        .sort((a, b) => {
+          const priceA = Number(a.priceWaitSell ?? 0)
+          const priceB = Number(b.priceWaitSell ?? 0)
+          return priceA - priceB // sort ascending (น้อยสุดก่อน)
+        })
+      const lastWaitSellOrder = sortedWaitSellOrders[0] // order ที่มี priceWaitSell น้อยที่สุด
       if (lastWaitSellOrder) {
         const waitSellPrice = Number(lastWaitSellOrder.priceWaitSell ?? 0)
         if (waitSellPrice > 0) {
@@ -3301,10 +3319,47 @@ export default function App() {
     </div>
   )
 
+  const sortOrders = (items, field, direction) => {
+    const sorted = [...items].sort((a, b) => {
+      let valueA, valueB
+      
+      // Handle field mappings
+      if (field === 'dateBuy') {
+        valueA = parseTimestamp(a.dateBuy ?? a.createTime)
+        valueB = parseTimestamp(b.dateBuy ?? b.createTime)
+      } else if (field === 'dateSell') {
+        valueA = parseTimestamp(a.dateSell ?? a.updateTime)
+        valueB = parseTimestamp(b.dateSell ?? b.updateTime)
+      } else {
+        valueA = a[field]
+        valueB = b[field]
+      }
+      
+      if (valueA === undefined || valueA === null) return 1
+      if (valueB === undefined || valueB === null) return -1
+      if (typeof valueA === 'number' && typeof valueB === 'number') {
+        return valueA - valueB
+      }
+      if (field.toLowerCase().includes('date') || field.toLowerCase().includes('time')) {
+        const dateA = valueA ? new Date(valueA) : null
+        const dateB = valueB ? new Date(valueB) : null
+        if (!dateA && !dateB) return 0
+        if (!dateA) return 1
+        if (!dateB) return -1
+        return dateA.getTime() - dateB.getTime()
+      }
+      return String(valueA).localeCompare(String(valueB))
+    })
+    return direction === 'asc' ? sorted : sorted.reverse()
+  }
+
   const filteredOrders = useMemo(() => {
-    if (orderFilter === 'all') return orders
-    return orders.filter((order) => order?.status === orderFilter)
-  }, [orders, orderFilter])
+    let filtered = orderFilter === 'all' ? orders : orders.filter((order) => order?.status === orderFilter)
+    if (orderViewMode === 'table') {
+      return sortOrders(filtered, ordersSort.field, ordersSort.direction)
+    }
+    return filtered
+  }, [orders, orderFilter, orderViewMode, ordersSort])
 
   const orderCounts = useMemo(() => {
     const all = orders.length
@@ -3354,6 +3409,24 @@ export default function App() {
           <h3>Waiting & Sold</h3>
         </div>
         <div className="button-group">
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+            <button
+              className={`secondary small ${orderViewMode === 'card' ? '' : 'ghost'}`}
+              onClick={() => setOrderViewMode('card')}
+              title="Card View"
+              style={{ fontSize: '12px', padding: '4px 8px' }}
+            >
+              📋 Card
+            </button>
+            <button
+              className={`secondary small ${orderViewMode === 'table' ? '' : 'ghost'}`}
+              onClick={() => setOrderViewMode('table')}
+              title="Table View"
+              style={{ fontSize: '12px', padding: '4px 8px' }}
+            >
+              📊 Table
+            </button>
+          </div>
           <button className="secondary ghost" onClick={() => fetchOrders('ordersManual')} disabled={ordersLoading}>
             {ordersLoading ? 'Loading...' : 'Refresh'}
           </button>
@@ -3415,7 +3488,7 @@ export default function App() {
           <div className="state-block empty">ไม่มีคำสั่งซื้อที่ตรงกับตัวกรอง</div>
         )}
 
-        {!ordersLoading && !ordersError && filteredOrders.length > 0 && (
+        {!ordersLoading && !ordersError && filteredOrders.length > 0 && orderViewMode === 'card' && (
           <div className="order-grid">
             {filteredOrders.map((order) => {
               const profit = Number(order?.profitLoss ?? 0)
@@ -3534,6 +3607,157 @@ export default function App() {
                 </article>
               )
             })}
+          </div>
+        )}
+
+        {!ordersLoading && !ordersError && filteredOrders.length > 0 && orderViewMode === 'table' && (
+          <div className="filled-orders-table">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th onClick={() => handleOrdersSort('dateBuy')} style={{ cursor: 'pointer' }}>
+                    Date Buy
+                    {ordersSort.field === 'dateBuy' && (
+                      <span className="sort-indicator">{ordersSort.direction === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </th>
+                  <th onClick={() => handleOrdersSort('dateSell')} style={{ cursor: 'pointer' }}>
+                    Date Sell
+                    {ordersSort.field === 'dateSell' && (
+                      <span className="sort-indicator">{ordersSort.direction === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </th>
+                  <th onClick={() => handleOrdersSort('id')} style={{ cursor: 'pointer' }}>
+                    ID
+                    {ordersSort.field === 'id' && (
+                      <span className="sort-indicator">{ordersSort.direction === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </th>
+                  <th onClick={() => handleOrdersSort('symbol')} style={{ cursor: 'pointer' }}>
+                    Symbol
+                    {ordersSort.field === 'symbol' && (
+                      <span className="sort-indicator">{ordersSort.direction === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </th>
+                  <th onClick={() => handleOrdersSort('status')} style={{ cursor: 'pointer' }}>
+                    Status
+                    {ordersSort.field === 'status' && (
+                      <span className="sort-indicator">{ordersSort.direction === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </th>
+                  <th onClick={() => handleOrdersSort('priceBuy')} style={{ cursor: 'pointer' }}>
+                    Buy Price
+                    {ordersSort.field === 'priceBuy' && (
+                      <span className="sort-indicator">{ordersSort.direction === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </th>
+                  <th onClick={() => handleOrdersSort('priceSellActual')} style={{ cursor: 'pointer' }}>
+                    Sell Price
+                    {ordersSort.field === 'priceSellActual' && (
+                      <span className="sort-indicator">{ordersSort.direction === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </th>
+                  <th onClick={() => handleOrdersSort('priceWaitSell')} style={{ cursor: 'pointer' }}>
+                    Wait Sell Price
+                    {ordersSort.field === 'priceWaitSell' && (
+                      <span className="sort-indicator">{ordersSort.direction === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </th>
+                  <th onClick={() => handleOrdersSort('profitLoss')} style={{ cursor: 'pointer' }}>
+                    Profit/Loss
+                    {ordersSort.field === 'profitLoss' && (
+                      <span className="sort-indicator">{ordersSort.direction === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </th>
+                  <th onClick={() => handleOrdersSort('buyAmountUSD')} style={{ cursor: 'pointer' }}>
+                    Amount USD
+                    {ordersSort.field === 'buyAmountUSD' && (
+                      <span className="sort-indicator">{ordersSort.direction === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </th>
+                  <th onClick={() => handleOrdersSort('coinQuantity')} style={{ cursor: 'pointer' }}>
+                    Coin Qty
+                    {ordersSort.field === 'coinQuantity' && (
+                      <span className="sort-indicator">{ordersSort.direction === 'asc' ? '▲' : '▼'}</span>
+                    )}
+                  </th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredOrders.map((order) => {
+                  const profit = Number(order?.profitLoss ?? 0)
+                  const isGain = profit >= 0
+                  return (
+                    <tr
+                      key={order.id}
+                      className={
+                        order?.status?.toLowerCase() === 'waiting_sell'
+                          ? 'order-row waiting'
+                          : order?.status?.toLowerCase() === 'sold'
+                          ? 'order-row sold'
+                          : ''
+                      }
+                    >
+                      <td className="table-value">{formatDateTimeWithOffset(order?.dateBuy, 7)}</td>
+                      <td className="table-value">{formatDateTimeWithOffset(order?.dateSell, 7)}</td>
+                      <td className="table-value mono">#{order?.id ?? '—'}</td>
+                      <td className="table-key">{order?.symbol || '—'}</td>
+                      <td>
+                        <span
+                          className={`status-badge status-${(order?.status || 'unknown').toLowerCase()} ${
+                            order?.status === 'WAITING_SELL' ? 'status-waiting-sell' : ''
+                          }`}
+                        >
+                          {order?.status || 'Unknown'}
+                        </span>
+                      </td>
+                      <td className="table-value">{order?.priceBuy ?? '-'}</td>
+                      <td className="table-value">{order?.priceSellActual ?? '-'}</td>
+                      <td className="table-value">
+                        {order?.priceWaitSell != null ? Number(order.priceWaitSell).toFixed(4) : '-'}
+                      </td>
+                      <td className={`table-value ${isGain ? 'positive' : 'negative'}`}>
+                        {isGain ? '+' : ''}
+                        {Number(order?.profitLoss ?? 0).toFixed(4)}
+                      </td>
+                      <td className="table-value">{order?.buyAmountUSD ?? '-'}</td>
+                      <td className="table-value">{order?.coinQuantity ?? order?.quantity ?? '-'}</td>
+                      <td>
+                        <div className="button-group" style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                          <button
+                            className="secondary small"
+                            type="button"
+                            onClick={() => openOrderEditModal(order)}
+                            title="Edit order"
+                          >
+                            ✏️
+                          </button>
+                          {order?.status === 'WAITING_SELL' && (
+                            <button
+                              className="primary ghost small"
+                              type="button"
+                              onClick={() => openSellModal(order)}
+                              title="Sell now"
+                            >
+                              ⚡️
+                            </button>
+                          )}
+                          <button
+                            className="danger small"
+                            type="button"
+                            onClick={() => handleDeleteOrder(order)}
+                            title="Delete order"
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

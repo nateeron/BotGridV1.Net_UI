@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <title>คำนวณ Grid เปอร์เซ็นต์ต่อไม้</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 480px;
+      margin: 20px auto;
+      line-height: 1.6;
+    }
+    label { display: block; margin-top: 10px; }
+    input {
+      padding: 4px 6px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    button {
+      margin-top: 10px;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+    .result {
+      margin-top: 8px;
+      padding: 8px;
+      border: 1px solid #ddd;
+      background: #f9f9f9;
+      white-space: pre-line;
+    }
+  </style>
+</head>
+<body>
+  <h2>คำนวณเปอร์เซ็นต์จาก Grid</h2>
+
+  <!-- ส่วนที่ 1: คิดเปอร์เซ็นต์รวมจาก จำนวนไม้ -->
+  <h3>1) คิด % รวมจาก จำนวนไม้</h3>
+  <label>
+    เปอร์เซ็นต์ต่อไม้ (% ต่อ 1 ไม้):
+    <input id="percentPerStep" type="number" step="0.00001" value="0.29125" />
+  </label>
+
+  <label>
+    จำนวนไม้:
+    <input id="steps" type="number" step="1" value="24" />
+  </label>
+
+  <button onclick="calcTotalPercent()">คำนวณเปอร์เซ็นต์รวม</button>
+
+  <div id="totalPercentResult" class="result"></div>
+
+  <hr />
+
+  <!-- ส่วนที่ 2: คิดจำนวนไม้จาก % รวมที่ต้องการ -->
+  <h3>2) คิด จำนวนไม้ จาก % รวมที่ต้องการ</h3>
+  <label>
+    เปอร์เซ็นต์ต่อไม้ (% ต่อ 1 ไม้):
+    <input id="percentPerStep2" type="number" step="0.00001" value="0.29125" />
+  </label>
+
+  <label>
+    เปอร์เซ็นต์รวมที่ต้องการ (%):
+    <input id="targetPercent" type="number" step="0.01" value="90" />
+  </label>
+
+  <button onclick="calcSteps()">คำนวณจำนวนไม้ที่ต้องใช้</button>
+
+  <div id="stepsResult" class="result"></div>
+
+  <script>
+    // 1) คำนวณเปอร์เซ็นต์รวมจากจำนวนไม้
+    function calcTotalPercent() {
+      const perStep = parseFloat(document.getElementById('percentPerStep').value || '0');
+      const steps   = parseFloat(document.getElementById('steps').value || '0');
+
+      const totalPercent = perStep * steps; // % รวม
+
+      const resultText =
+        `เปอร์เซ็นต์ต่อไม้: ${perStep.toFixed(5)} %\n` +
+        `จำนวนไม้: ${steps}\n` +
+        `เปอร์เซ็นต์รวม ≈ ${totalPercent.toFixed(4)} %`;
+
+      document.getElementById('totalPercentResult').textContent = resultText;
+    }
+
+    // 2) คำนวณจำนวนไม้จากเปอร์เซ็นต์รวมที่ต้องการ
+    function calcSteps() {
+      const perStep = parseFloat(document.getElementById('percentPerStep2').value || '0');
+      const target  = parseFloat(document.getElementById('targetPercent').value || '0');
+
+      if (perStep === 0) {
+        document.getElementById('stepsResult').textContent = 'กรุณาใส่เปอร์เซ็นต์ต่อไม้มากกว่า 0';
+        return;
+      }
+
+      const steps = target / perStep; // จำนวนไม้แบบทฤษฎี
+
+      const resultText =
+        `เปอร์เซ็นต์ต่อไม้: ${perStep.toFixed(5)} %\n` +
+        `ต้องการเปอร์เซ็นต์รวม: ${target.toFixed(2)} %\n` +
+        `จำนวนไม้ที่ต้องใช้ (ทฤษฎี) ≈ ${steps.toFixed(2)} ไม้\n` +
+        `ปัดขึ้นเป็นจำนวนเต็ม: ${Math.ceil(steps)} ไม้`;
+
+      document.getElementById('stepsResult').textContent = resultText;
+    }
+  </script>
+</body>
+</html>
