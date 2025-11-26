@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as signalR from '@microsoft/signalr'
 
 const tabs = [
@@ -138,6 +138,199 @@ const defaultFilledOrdersForm = {
   Limit: 25,
 }
 
+const LIGHTWEIGHT_CHARTS_CDN =
+  'https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js'
+
+let lightweightChartsLibPromise = null
+const loadedScripts = new Set()
+
+const loadExternalScriptOnce = (src) => {
+  if (typeof document === 'undefined') return Promise.resolve()
+  if (loadedScripts.has(src)) return Promise.resolve()
+  loadedScripts.add(src)
+
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[data-src="${src}"]`)
+    if (existing) {
+      existing.addEventListener('load', () => resolve())
+      existing.addEventListener('error', reject)
+      return
+    }
+    const script = document.createElement('script')
+    script.src = src
+    script.async = true
+    script.dataset.src = src
+    script.onload = () => resolve()
+    script.onerror = (err) => reject(err)
+    document.head.appendChild(script)
+  })
+}
+
+const loadLightweightChartsModule = async () => {
+  if (typeof window !== 'undefined') {
+    if (window.LightweightCharts) {
+      return window.LightweightCharts
+    }
+    await loadExternalScriptOnce(LIGHTWEIGHT_CHARTS_CDN)
+    if (window.LightweightCharts) {
+      return window.LightweightCharts
+    }
+    console.warn('CDN load failed, falling back to dynamic import')
+  }
+
+  if (!lightweightChartsLibPromise) {
+    lightweightChartsLibPromise = (async () => {
+      try {
+        const mod = await import('lightweight-charts')
+        if (typeof mod === 'function') {
+          return {
+            createChart: mod,
+          }
+        }
+        if (mod?.createChart) return mod
+        if (mod?.default?.createChart) return mod.default
+      } catch (err) {
+        console.warn('Dynamic import of lightweight-charts failed:', err)
+      }
+      throw new Error('lightweight-charts is not available in this environment')
+    })()
+  }
+
+  return lightweightChartsLibPromise
+}
+
+const toLineSeriesData = (items = []) =>
+  (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      time: item.time,
+      value: Number(item.close ?? item.value ?? item.price ?? 0),
+    }))
+    .filter((entry) => entry.time && Number.isFinite(entry.value))
+
+const parseTimestamp = (value) => {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null
+    if (value > 1e12) return Math.floor(value)
+    if (value > 1e9) return Math.floor(value * 1000)
+    return Math.floor(value * 1000)
+  }
+  const numeric = Number(value)
+  if (!Number.isNaN(numeric)) {
+    if (numeric > 1e12) return Math.floor(numeric)
+    if (numeric > 1e9) return Math.floor(numeric * 1000)
+    return Math.floor(numeric * 1000)
+  }
+  const parsed = Date.parse(value)
+  if (Number.isNaN(parsed)) return null
+  return parsed
+}
+
+const normalizeTimeSec = (value) => {
+  const ms = parseTimestamp(value)
+  if (!ms) return null
+  return Math.floor(ms / 1000)
+}
+
+const toCandle = (raw) => {
+  if (!Array.isArray(raw) || raw.length < 5) return null
+  const time = Number(raw[0])
+  const open = Number(raw[1])
+  const high = Number(raw[2])
+  const low = Number(raw[3])
+  const close = Number(raw[4])
+
+  if ([time, open, high, low, close].some((v) => Number.isNaN(v))) return null
+
+  return {
+    time: Math.floor(time / 1000),
+    open,
+    high,
+    low,
+    close,
+  }
+}
+
+const fetchBinanceKlines = async ({ symbol, interval = '1m', endTime } = {}) => {
+  const url = new URL('https://api.binance.com/api/v3/klines')
+  url.searchParams.set('symbol', (symbol || 'XRPUSDT').toUpperCase())
+  url.searchParams.set('interval', interval)
+  url.searchParams.set('limit', '1000')
+
+  if (endTime) {
+    url.searchParams.set('endTime', String(endTime))
+  }
+
+  const response = await fetch(url.toString())
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || 'Failed to fetch Binance klines')
+  }
+
+  const json = await response.json()
+  return Array.isArray(json) ? json : []
+}
+
+const buildTradesFromOrders = (orders = []) => {
+  if (!Array.isArray(orders)) return []
+  return orders
+    .map((order) => {
+      if (!order) return null
+      const entryMs =
+        parseTimestamp(order.dateBuy) ??
+        parseTimestamp(order.buyTime) ??
+        parseTimestamp(order.timeBuy) ??
+        parseTimestamp(order.createTime) ??
+        parseTimestamp(order.timestamp)
+      const exitMs =
+        parseTimestamp(order.dateSell) ??
+        parseTimestamp(order.sellTime) ??
+        parseTimestamp(order.doneTime) ??
+        parseTimestamp(order.updateTime)
+      const entryPrice = Number(order.priceBuy ?? order.entryPrice ?? order.price)
+
+      if (!entryMs || !Number.isFinite(entryPrice) || entryPrice <= 0) return null
+
+      const rawSide = String(order.side ?? order.orderSide ?? order.status ?? '').toUpperCase()
+      const side = rawSide.includes('SELL') ? 'SELL' : 'BUY'
+      const exitPrice = Number(order.priceSellActual ?? order.exitPrice ?? order.sellPrice)
+      const tp = Number(order.priceWaitSell ?? order.takeProfit ?? order.tp)
+      const sl = Number(order.priceCutloss ?? order.cutLossPrice ?? order.stopLoss ?? order.sl)
+
+      return {
+        id: order.id ?? order.orderId ?? order.orderBuyID ?? `${order.symbol || 'ORD'}-${entryMs}`,
+        time: entryMs,
+        price: entryPrice,
+        side,
+        tp: Number.isFinite(tp) && tp > 0 ? tp : null,
+        sl: Number.isFinite(sl) && sl > 0 ? sl : null,
+        exitTime: exitMs || null,
+        exitPrice: Number.isFinite(exitPrice) && exitPrice > 0 ? exitPrice : null,
+      }
+    })
+    .filter(Boolean)
+}
+
+const buildHorizontalLinesFromOrders = (orders = []) => {
+  if (!Array.isArray(orders)) return []
+  return orders
+    .filter((order) => Number(order?.priceWaitSell) > 0)
+    .map((order) => {
+      const timestamp =
+        parseTimestamp(order.dateBuy) ??
+        parseTimestamp(order.buyTime) ??
+        parseTimestamp(order.createTime) ??
+        Date.now()
+      return {
+        timestamp,
+        price: Number(order.priceWaitSell),
+        side: String(order.side ?? order.orderSide ?? order.status ?? '').toUpperCase().includes('SELL') ? 'SELL' : 'BUY',
+        lineStyle: order.status === 'WAITING_SELL' ? 'dashed' : 'dotted',
+      }
+    })
+    .filter((line) => line.timestamp && Number.isFinite(line.price))
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState(() => loadPrimitiveState('activeTab', 'orders'))
   const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
@@ -162,13 +355,46 @@ export default function App() {
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
   const [sellModalData, setSellModalData] = useState(null)
   const [viewMode, setViewMode] = useState(() => loadPrimitiveState('viewMode', 'chart')) // 'chart', 'calculate', 'trade', 'priceChart'
+  const [priceChartInterval, setPriceChartInterval] = useState(() =>
+    loadPrimitiveState('priceChartInterval', '1m')
+  )
+  const [customChartSymbol, setCustomChartSymbol] = useState(() =>
+    loadPrimitiveState('customChartSymbol', 'XRPUSDT')
+  )
   const [priceChartData, setPriceChartData] = useState([])
   const [priceChartLoading, setPriceChartLoading] = useState(false)
-  const priceChartRef = useRef(null)
+  const [priceChartError, setPriceChartError] = useState(null)
   const priceChartContainerRef = useRef(null)
   const priceChartInstanceRef = useRef(null)
   const priceSeriesRef = useRef(null)
-  const waitingLinesRef = useRef([])
+  const priceChartEngineRef = useRef({
+    interval: priceChartInterval,
+    ws: null,
+    allData: [],
+    earliestTimeMs: null,
+    loadingMore: false,
+    tradePriceLines: [],
+    tradeOverlays: [],
+    lineOverlays: [],
+    seriesType: 'candlestick',
+    chart: null,
+    series: null,
+  })
+  const ordersRef = useRef([])
+  const priceChartIntervalInitializedRef = useRef(false)
+  const priceChartInitRetryRef = useRef(0)
+  const priceChartIntervalOptions = useMemo(
+    () => [
+      { value: '1m', label: '1m' },
+      { value: '3m', label: '3m' },
+      { value: '5m', label: '5m' },
+      { value: '15m', label: '15m' },
+      { value: '1h', label: '1h' },
+      { value: '4h', label: '4h' },
+      { value: '1d', label: '1D mini' },
+    ],
+    []
+  )
   const [cal1, setCal1] = useState(() => loadPrimitiveState('cal1', ''))
   const [cal2, setCal2] = useState(() => loadPrimitiveState('cal2', ''))
   const [percentInput, setPercentInput] = useState(() => loadPrimitiveState('percentInput', '100'))
@@ -253,6 +479,14 @@ export default function App() {
     }),
     []
   )
+
+  useEffect(() => {
+    ordersRef.current = orders
+  }, [orders])
+
+  useEffect(() => {
+    priceChartEngineRef.current.interval = priceChartInterval || '1m'
+  }, [priceChartInterval])
 
   const headers = useMemo(
     () => ({
@@ -624,6 +858,16 @@ export default function App() {
     if (typeof window === 'undefined') return
     sessionStorage.setItem('viewMode', viewMode)
   }, [viewMode])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('priceChartInterval', priceChartInterval)
+  }, [priceChartInterval])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('customChartSymbol', customChartSymbol)
+  }, [customChartSymbol])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -1453,275 +1697,784 @@ export default function App() {
     setAlerts([])
   }
 
-  // Get symbol from orders or settings
-  const getChartSymbol = () => {
+  const priceChartSymbolOptions = useMemo(
+    () => [
+      { value: 'XRPUSDT', label: 'XRPUSDT' },
+      { value: 'SOLUSDT', label: 'SOLUSDT' },
+      { value: 'BNBUSDT', label: 'BNBUSDT' },
+      { value: 'BTCUSDT', label: 'BTCUSDT' },
+    ],
+    []
+  )
+
+  const resolvedChartSymbol = useMemo(() => {
+    if (customChartSymbol) {
+      return customChartSymbol.toUpperCase()
+    }
     if (orders.length > 0) {
       return orders[0]?.symbol || 'XRPUSDT'
     }
     if (settings.length > 0) {
-      const setting = settings.find(s => s.id === selectedSettingId) || settings[0]
+      const setting = settings.find((s) => s.id === selectedSettingId) || settings[0]
       return setting?.symbol || setting?.SYMBOL || 'XRPUSDT'
     }
     return 'XRPUSDT'
-  }
+  }, [orders, settings, selectedSettingId])
 
-  // Fetch price data from API
-  const fetchPriceData = async () => {
-    const symbol = getChartSymbol()
-    if (!symbol) return
+  // Get symbol from orders or settings
+  const getChartSymbol = () => resolvedChartSymbol
 
-    setPriceChartLoading(true)
-    try {
-      // Try to get price from orders first (use latest price from orders)
-      const latestOrder = orders.find(o => o?.symbol === symbol)
-      const basePrice = latestOrder?.priceBuy || latestOrder?.priceSellActual || latestOrder?.priceWaitSell || 2.0
-      
-      // Try API endpoint for price data
-      try {
-        const url = buildUrl(apiBase, `Binace/GetPrice?symbol=${symbol}`)
-        const response = await fetch(url)
-        const data = await response.json()
-        
-        if (data?.success && data?.data) {
-          const priceData = Array.isArray(data.data) ? data.data : [data.data]
-          // Format data for chart
-          const formattedData = priceData.map((item, index) => ({
-            time: item.time || (Date.now() / 1000) - (priceData.length - index) * 60,
-            value: Number(item.close || item.price || item.value || basePrice),
-          }))
-          setPriceChartData(formattedData)
-          return
-        }
-      } catch (apiErr) {
-        console.log('API not available, using mock data:', apiErr)
-      }
-
-      // Generate mock data if API is not available
-      const now = Date.now() / 1000
-      const mockData = []
-      for (let i = 59; i >= 0; i--) {
-        const time = now - (i * 60) // Last 60 minutes
-        const variation = (Math.random() - 0.5) * 0.1 // ±5% variation
-        const price = basePrice * (1 + variation)
-        mockData.push({
-          time: time,
-          value: Number(price.toFixed(4)),
-        })
-      }
-      setPriceChartData(mockData)
-    } catch (err) {
-      console.error('Error fetching price data:', err)
-      // Generate fallback mock data
-      const now = Date.now() / 1000
-      const mockData = []
-      for (let i = 59; i >= 0; i--) {
-        mockData.push({
-          time: now - (i * 60),
-          value: 2.0 + (Math.random() - 0.5) * 0.1,
-        })
-      }
-      setPriceChartData(mockData)
-    } finally {
-      setPriceChartLoading(false)
+  const applySeriesData = useCallback((data) => {
+    if (!priceSeriesRef.current || !Array.isArray(data)) return
+    const engine = priceChartEngineRef.current
+    if (engine.seriesType === 'candlestick') {
+      priceSeriesRef.current.setData(data)
+    } else {
+      priceSeriesRef.current.setData(toLineSeriesData(data))
     }
-  }
+  }, [])
 
-  // Initialize lightweight chart
+  const updateSeriesPoint = useCallback((point) => {
+    if (!priceSeriesRef.current || !point) return
+    const engine = priceChartEngineRef.current
+    if (engine.seriesType === 'candlestick') {
+      priceSeriesRef.current.update(point)
+    } else {
+      priceSeriesRef.current.update({
+        time: point.time,
+        value: Number(point.close ?? point.value ?? point.price ?? 0),
+      })
+    }
+  }, [])
+
+  const loadInitialCandles = useCallback(
+    async (symbol, { silent = false } = {}) => {
+      if (!symbol) return
+      const engine = priceChartEngineRef.current
+      if (!silent) {
+        setPriceChartLoading(true)
+      }
+      setPriceChartError(null)
+      try {
+        const klines = await fetchBinanceKlines({ symbol, interval: engine.interval })
+        const candles = klines.map(toCandle).filter(Boolean).sort((a, b) => a.time - b.time)
+        engine.allData = candles
+        engine.earliestTimeMs = candles.length ? candles[0].time * 1000 : null
+        applySeriesData(candles)
+        setPriceChartData(candles)
+      } catch (err) {
+        console.error('Error fetching candles:', err)
+        setPriceChartError(err)
+        if (!priceChartEngineRef.current.allData.length) {
+          const now = Math.floor(Date.now() / 1000)
+          const fallback = []
+          let lastClose = 2
+          for (let i = 59; i >= 0; i -= 1) {
+            const time = now - i * 60
+            const open = lastClose
+            const close = open * (1 + (Math.random() - 0.5) * 0.02)
+            const high = Math.max(open, close) * (1 + Math.random() * 0.01)
+            const low = Math.min(open, close) * (1 - Math.random() * 0.01)
+            fallback.push({
+              time,
+              open: Number(open.toFixed(4)),
+              high: Number(high.toFixed(4)),
+              low: Number(low.toFixed(4)),
+              close: Number(close.toFixed(4)),
+            })
+            lastClose = close
+          }
+          priceChartEngineRef.current.allData = fallback
+          priceChartEngineRef.current.earliestTimeMs = fallback[0]?.time ? fallback[0].time * 1000 : null
+          applySeriesData(fallback)
+          setPriceChartData(fallback)
+        }
+      } finally {
+        if (!silent) {
+          setPriceChartLoading(false)
+        }
+      }
+    },
+    [applySeriesData]
+  )
+
+  const loadMoreCandles = useCallback(
+    async (symbol) => {
+      if (!symbol) return
+      const engine = priceChartEngineRef.current
+      if (engine.loadingMore || !engine.earliestTimeMs) return
+      engine.loadingMore = true
+      try {
+        const klines = await fetchBinanceKlines({
+          symbol,
+          interval: engine.interval,
+          endTime: engine.earliestTimeMs - 1,
+        })
+        const candles = klines.map(toCandle).filter(Boolean).sort((a, b) => a.time - b.time)
+        if (!candles.length) return
+
+        const oldestTime = engine.allData[0]?.time ?? null
+        const olderOnly = oldestTime ? candles.filter((candle) => candle.time < oldestTime) : candles
+        if (olderOnly.length) {
+          engine.allData = [...olderOnly, ...engine.allData]
+          engine.earliestTimeMs = engine.allData[0].time * 1000
+          applySeriesData(engine.allData)
+          setPriceChartData([...engine.allData])
+        }
+      } catch (err) {
+        console.error('Error loading more candles:', err)
+      } finally {
+        engine.loadingMore = false
+      }
+    },
+    [applySeriesData]
+  )
+
+  const stopRealtimeFeed = useCallback(() => {
+    const engine = priceChartEngineRef.current
+    if (engine.ws) {
+      try {
+        engine.ws.close()
+      } catch (err) {
+        console.debug('Error closing price WS:', err)
+      }
+      engine.ws = null
+    }
+  }, [])
+
+  const startRealtimeFeed = useCallback(
+    (symbol) => {
+      if (!symbol) return
+      const engine = priceChartEngineRef.current
+      if (engine.ws) {
+        try {
+          engine.ws.close()
+        } catch {
+          // ignore
+        }
+      }
+      const ws = new WebSocket(`wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@kline_${engine.interval}`)
+      engine.ws = ws
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data)
+          const kline = payload?.k
+          if (!kline) return
+          const candle = {
+            time: Math.floor(Number(kline.t) / 1000),
+            open: Number(kline.o),
+            high: Number(kline.h),
+            low: Number(kline.l),
+            close: Number(kline.c),
+          }
+
+          const data = engine.allData
+          const last = data[data.length - 1]
+          if (last && candle.time === last.time) {
+            data[data.length - 1] = candle
+          } else if (!last || candle.time > last.time) {
+            data.push(candle)
+          }
+          engine.allData = data
+          updateSeriesPoint(candle)
+          setPriceChartData([...engine.allData])
+        } catch (err) {
+          console.error('WS candle parse error:', err)
+        }
+      }
+      ws.onerror = (err) => {
+        console.error('Binance WS error:', err)
+      }
+    },
+    [updateSeriesPoint]
+  )
+
   useEffect(() => {
-    if (viewMode !== 'priceChart' || !priceChartContainerRef.current) return
+    if (viewMode !== 'priceChart') return
+    if (!resolvedChartSymbol) return
+    if (!priceChartIntervalInitializedRef.current) {
+      priceChartIntervalInitializedRef.current = true
+      return
+    }
+    const reload = async () => {
+      stopRealtimeFeed()
+      await loadInitialCandles(resolvedChartSymbol)
+      startRealtimeFeed(resolvedChartSymbol)
+    }
+    reload()
+  }, [
+    priceChartInterval,
+    loadInitialCandles,
+    resolvedChartSymbol,
+    startRealtimeFeed,
+    stopRealtimeFeed,
+    viewMode,
+  ])
 
+  const resetPriceChartDecorations = useCallback(() => {
+    const engine = priceChartEngineRef.current
+    const candleSeries = priceSeriesRef.current
+    if (candleSeries && engine.tradePriceLines.length) {
+      engine.tradePriceLines.forEach((line) => {
+        try {
+          candleSeries.removePriceLine(line)
+        } catch {
+          // ignore
+        }
+      })
+    }
+    engine.tradePriceLines = []
+
+    if (engine.chart && engine.tradeOverlays.length) {
+      engine.tradeOverlays.forEach((series) => {
+        try {
+          engine.chart.removeSeries(series)
+        } catch {
+          // ignore
+        }
+      })
+    }
+    engine.tradeOverlays = []
+
+    if (engine.chart && engine.lineOverlays.length) {
+      engine.lineOverlays.forEach((series) => {
+        try {
+          engine.chart.removeSeries(series)
+        } catch {
+          // ignore
+        }
+      })
+    }
+    engine.lineOverlays = []
+  }, [])
+
+  const applyTradeDecorations = useCallback((trades) => {
+    const engine = priceChartEngineRef.current
+    const candleSeries = priceSeriesRef.current
+    const chart = priceChartInstanceRef.current
+    if (!candleSeries || !chart) return
+
+    if (engine.tradePriceLines.length) {
+      engine.tradePriceLines.forEach((line) => {
+        try {
+          candleSeries.removePriceLine(line)
+        } catch {
+          // ignore
+        }
+      })
+      engine.tradePriceLines = []
+    }
+
+    if (engine.tradeOverlays.length) {
+      engine.tradeOverlays.forEach((series) => {
+        try {
+          chart.removeSeries(series)
+        } catch {
+          // ignore
+        }
+      })
+      engine.tradeOverlays = []
+    }
+
+    if (!Array.isArray(trades) || trades.length === 0) {
+      candleSeries.setMarkers([])
+      return
+    }
+
+    const markers = []
+
+    trades.forEach((trade) => {
+      const entryTimeSec = normalizeTimeSec(trade.time)
+      const exitTimeSec = normalizeTimeSec(trade.exitTime)
+      const entryPrice = Number(trade.price)
+      if (!entryTimeSec || !Number.isFinite(entryPrice)) return
+      const side = (trade.side || 'BUY').toUpperCase()
+      const isBuy = side !== 'SELL'
+
+      markers.push({
+        time: entryTimeSec,
+        position: isBuy ? 'belowBar' : 'aboveBar',
+        color: isBuy ? '#26a69a' : '#ef5350',
+        shape: isBuy ? 'arrowUp' : 'arrowDown',
+        text: `${side} ${entryPrice}`,
+      })
+
+      const entryLine = candleSeries.createPriceLine({
+        price: entryPrice,
+        color: isBuy ? '#26a69a' : '#ef5350',
+        lineWidth: 2,
+        axisLabelVisible: true,
+        title: `${side} ${entryPrice}`,
+      })
+      engine.tradePriceLines.push(entryLine)
+
+      const tpValue = Number(trade.tp)
+      if (Number.isFinite(tpValue) && tpValue > 0) {
+        const tpLine = candleSeries.createPriceLine({
+          price: tpValue,
+          color: '#00ff00',
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: 'TP',
+        })
+        engine.tradePriceLines.push(tpLine)
+      }
+
+      const slValue = Number(trade.sl)
+      if (Number.isFinite(slValue) && slValue > 0) {
+        const slLine = candleSeries.createPriceLine({
+          price: slValue,
+          color: '#ff4444',
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: 'SL',
+        })
+        engine.tradePriceLines.push(slLine)
+      }
+
+      if (exitTimeSec && Number.isFinite(trade.exitPrice)) {
+        const pnlPct = isBuy
+          ? ((trade.exitPrice - entryPrice) / entryPrice) * 100
+          : ((entryPrice - trade.exitPrice) / entryPrice) * 100
+        const pnlText = `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%`
+        markers.push({
+          time: exitTimeSec,
+          position: 'aboveBar',
+          color: pnlPct >= 0 ? '#00ff00' : '#ff4444',
+          shape: 'circle',
+          text: `PNL ${pnlText}`,
+        })
+        const connectSeries = chart.addLineSeries({
+          color: pnlPct >= 0 ? '#00ff00' : '#ff4444',
+          lineWidth: 2,
+          priceLineVisible: false,
+        })
+        connectSeries.setData([
+          { time: entryTimeSec, value: entryPrice },
+          { time: exitTimeSec, value: Number(trade.exitPrice) },
+        ])
+        engine.tradeOverlays.push(connectSeries)
+      }
+    })
+
+    candleSeries.setMarkers(markers)
+  }, [])
+
+  const plotHorizontalLines = useCallback((linesData) => {
+    const engine = priceChartEngineRef.current
+    const chart = priceChartInstanceRef.current
+    if (!chart) return
+
+    if (engine.lineOverlays.length) {
+      engine.lineOverlays.forEach((series) => {
+        try {
+          chart.removeSeries(series)
+        } catch {
+          // ignore
+        }
+      })
+      engine.lineOverlays = []
+    }
+
+    if (!Array.isArray(linesData) || linesData.length === 0) return
+
+    const convertLineStyle = (style) => {
+      if (typeof style === 'number') {
+        return Math.max(0, Math.min(2, style))
+      }
+      const normalized = String(style || '').toLowerCase()
+      if (normalized === 'solid') return 0
+      if (normalized === 'dotted') return 1
+      return 2
+    }
+
+    linesData.slice(-100).forEach((line) => {
+      const startTimeSec = normalizeTimeSec(line.timestamp)
+      if (!startTimeSec || !Number.isFinite(line.price)) return
+      const endTimeSec = startTimeSec + 60 * 60
+      const series = chart.addLineSeries({
+        color: line.side === 'SELL' ? '#ff88cc' : '#00aaff',
+        lineWidth: 2,
+        lineStyle: convertLineStyle(line.lineStyle),
+        priceLineVisible: false,
+      })
+      series.setData([
+        { time: startTimeSec, value: Number(line.price) },
+        { time: endTimeSec, value: Number(line.price) },
+      ])
+      engine.lineOverlays.push(series)
+    })
+  }, [])
+
+  const fetchPriceData = useCallback(async () => {
+    if (viewMode !== 'priceChart') return
+    if (!resolvedChartSymbol) return
+    stopRealtimeFeed()
+    await loadInitialCandles(resolvedChartSymbol)
+    startRealtimeFeed(resolvedChartSymbol)
+  }, [loadInitialCandles, resolvedChartSymbol, startRealtimeFeed, stopRealtimeFeed, viewMode])
+
+  useEffect(() => {
+    if (viewMode !== 'priceChart') {
+      stopRealtimeFeed()
+      return
+    }
+    if (!priceChartContainerRef.current) return
+
+    let isMounted = true
+    let resizeHandler = null
     let chart = null
-    let interval = null
-    let handleResize = null
+    let handleRangeChange = null
+    const engine = priceChartEngineRef.current
 
     const initChart = async () => {
       try {
-        // Dynamic import lightweight-charts
-        const { createChart, ColorType } = await import('lightweight-charts')
-        
-        const container = priceChartContainerRef.current
-        if (!container) return
+        let chartsModule = null
+        let createChart = null
+        let ColorType = {}
+        let CrosshairMode = {}
 
+        const ensureModule = async () => {
+          chartsModule = await loadLightweightChartsModule()
+          createChart =
+            typeof chartsModule === 'function'
+              ? chartsModule
+              : typeof chartsModule?.createChart === 'function'
+              ? chartsModule.createChart
+              : typeof chartsModule?.default === 'function'
+              ? chartsModule.default
+              : typeof chartsModule?.default?.createChart === 'function'
+              ? chartsModule.default.createChart
+              : null
+          ColorType =
+            chartsModule?.ColorType ||
+            chartsModule?.enums?.ColorType ||
+            chartsModule?.default?.ColorType ||
+            {}
+          CrosshairMode =
+            chartsModule?.CrosshairMode ||
+            chartsModule?.enums?.CrosshairMode ||
+            chartsModule?.default?.CrosshairMode ||
+            {}
+        }
+
+        await ensureModule()
+        if (typeof createChart !== 'function' && typeof window !== 'undefined') {
+          // Force-load CDN if dynamic import produced placeholder
+          lightweightChartsLibPromise = null
+          await loadExternalScriptOnce(LIGHTWEIGHT_CHARTS_CDN)
+          await ensureModule()
+        }
+
+        if (typeof createChart !== 'function') {
+          throw new Error('lightweight-charts: createChart not available')
+        }
+        if (!isMounted || !priceChartContainerRef.current) return
+
+        const container = priceChartContainerRef.current
         chart = createChart(container, {
           layout: {
-            background: { type: ColorType.Solid, color: '#0d1524' },
+            background: { type: ColorType.Solid || 'solid', color: '#0d1524' },
             textColor: '#eaf2ff',
           },
           grid: {
             vertLines: { color: 'rgba(0, 209, 255, 0.1)' },
             horzLines: { color: 'rgba(0, 209, 255, 0.1)' },
           },
+          crosshair: {
+            mode: CrosshairMode.Normal ?? 0,
+          },
+          timeScale: {
+            timeVisible: true,
+            secondsVisible: false,
+            rightOffset: 12,
+          },
           width: container.clientWidth,
-          height: 400,
+          height: 420,
         })
 
-        // Use line series for price chart
-        // For lightweight-charts v5, the API should be available
-        let lineSeries = null
-        
-        // Debug: Log available methods
-        const chartMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(chart))
-        console.log('Chart methods:', chartMethods.filter(m => m.includes('Series') || m.includes('add')))
-        
-        // Try to create line series
-        if (typeof chart.addLineSeries === 'function') {
-          lineSeries = chart.addLineSeries({
-            color: '#00d1ff',
-            lineWidth: 2,
-            title: 'Price',
-          })
-        } else if (typeof chart.addAreaSeries === 'function') {
-          // Fallback to area series
-          lineSeries = chart.addAreaSeries({
-            lineColor: '#00d1ff',
-            topColor: 'rgba(0, 209, 255, 0.1)',
-            bottomColor: 'rgba(0, 209, 255, 0)',
-            lineWidth: 2,
-          })
+        const ensureSeriesSupport = () => {
+          const methods = [
+            'addCandlestickSeries',
+            'addAreaSeries',
+            'addLineSeries',
+            'addBaselineSeries',
+          ]
+          return methods.some((method) => typeof chart[method] === 'function')
+        }
+
+        if (!ensureSeriesSupport()) {
+          priceChartInitRetryRef.current += 1
+          if (priceChartInitRetryRef.current <= 5) {
+            console.warn(
+              '[PriceChart] Chart API not ready, retrying...',
+              priceChartInitRetryRef.current
+            )
+            try {
+              chart.remove()
+            } catch {
+              // ignore
+            }
+            setTimeout(() => {
+              if (!isMounted) return
+              initChart()
+            }, 200 * priceChartInitRetryRef.current)
+            return
+          }
+          setPriceChartError(new Error('Chart API not ready'))
+          console.error('Lightweight-charts chart object missing series methods after retries:', chart)
+          return
+        }
+        priceChartInitRetryRef.current = 0
+
+        let primarySeries = null
+        let seriesType = 'candlestick'
+        const createSeries = () => {
+          if (typeof chart.addCandlestickSeries === 'function') {
+            return {
+              type: 'candlestick',
+              series: chart.addCandlestickSeries({
+                upColor: '#26a69a',
+                downColor: '#ef5350',
+                borderVisible: false,
+                wickUpColor: '#26a69a',
+                wickDownColor: '#ef5350',
+              }),
+            }
+          }
+          if (typeof chart.addAreaSeries === 'function') {
+            return {
+              type: 'area',
+              series: chart.addAreaSeries({
+                lineColor: '#00d1ff',
+                topColor: 'rgba(0, 209, 255, 0.15)',
+                bottomColor: 'rgba(0, 209, 255, 0.02)',
+                lineWidth: 2,
+              }),
+            }
+          }
+          if (typeof chart.addLineSeries === 'function') {
+            return {
+              type: 'line',
+              series: chart.addLineSeries({
+                color: '#00d1ff',
+                lineWidth: 2,
+              }),
+            }
+          }
+          if (typeof chart.addBaselineSeries === 'function') {
+            return {
+              type: 'line',
+              series: chart.addBaselineSeries({
+                baseValue: { type: 'price', price: 0 },
+                topLineColor: '#00d1ff',
+                bottomLineColor: '#00d1ff',
+                topFillColor1: 'rgba(0, 209, 255, 0.2)',
+                bottomFillColor1: 'rgba(0, 209, 255, 0.2)',
+              }),
+            }
+          }
+          return null
+        }
+
+        const createdSeries = createSeries()
+        if (!createdSeries) {
+          try {
+            chart.remove()
+          } catch {
+            // ignore
+          }
+          const fallbackLineSeries = chart.addLineSeries
+            ? chart.addLineSeries({
+                color: '#00d1ff',
+                lineWidth: 2,
+              })
+            : null
+          if (!fallbackLineSeries) {
+            setPriceChartError(new Error('No compatible series method found on chart instance'))
+            console.error('Lightweight-charts chart object has no add*Series methods:', chart)
+            return
+          }
+          primarySeries = fallbackLineSeries
+          seriesType = 'line'
         } else {
-          console.error('No series method available. Chart object:', chart)
-          throw new Error('Chart API not available. Available methods: ' + chartMethods.join(', '))
+          primarySeries = createdSeries.series
+          seriesType = createdSeries.type
         }
 
         priceChartInstanceRef.current = chart
-        priceSeriesRef.current = lineSeries
+        priceSeriesRef.current = primarySeries
+        engine.chart = chart
+        engine.series = primarySeries
+        engine.seriesType = seriesType
+        engine.allData = []
+        engine.earliestTimeMs = null
 
-        // Fetch initial data
-        fetchPriceData()
+        await loadInitialCandles(resolvedChartSymbol)
+        applyTradeDecorations(buildTradesFromOrders(ordersRef.current))
+        plotHorizontalLines(buildHorizontalLinesFromOrders(ordersRef.current))
+        startRealtimeFeed(resolvedChartSymbol)
 
-        // Handle resize
-        handleResize = () => {
-          if (container && chart) {
-            chart.applyOptions({ width: container.clientWidth })
+        handleRangeChange = async (logicalRange) => {
+          if (!logicalRange || logicalRange.from == null) return
+          if (logicalRange.from < 5) {
+            await loadMoreCandles(resolvedChartSymbol)
           }
         }
-        window.addEventListener('resize', handleResize)
 
-        // Real-time updates (poll every 5 seconds)
-        interval = setInterval(() => {
-          fetchPriceData()
-        }, 5000)
+        chart.timeScale().subscribeVisibleLogicalRangeChange(handleRangeChange)
+
+        resizeHandler = () => {
+          if (priceChartContainerRef.current && chart) {
+            chart.applyOptions({ width: priceChartContainerRef.current.clientWidth })
+          }
+        }
+        window.addEventListener('resize', resizeHandler)
       } catch (err) {
         console.error('Error initializing chart:', err)
+        setPriceChartError(err)
       }
     }
 
     initChart()
 
     return () => {
-      if (handleResize) {
-        window.removeEventListener('resize', handleResize)
+      isMounted = false
+      stopRealtimeFeed()
+      if (chart && handleRangeChange) {
+        try {
+          chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleRangeChange)
+        } catch {
+          // ignore
+        }
       }
-      if (interval) {
-        clearInterval(interval)
+      if (resizeHandler) {
+        window.removeEventListener('resize', resizeHandler)
       }
-      if (chart) {
-        chart.remove()
+      if (priceChartInstanceRef.current) {
+        try {
+          priceChartInstanceRef.current.remove()
+        } catch {
+          // ignore
+        }
       }
       priceChartInstanceRef.current = null
       priceSeriesRef.current = null
-      waitingLinesRef.current = []
+      engine.chart = null
+      engine.series = null
+      engine.seriesType = 'candlestick'
+      resetPriceChartDecorations()
     }
-  }, [viewMode])
+  }, [
+    applyTradeDecorations,
+    loadInitialCandles,
+    loadMoreCandles,
+    plotHorizontalLines,
+    resolvedChartSymbol,
+    startRealtimeFeed,
+    stopRealtimeFeed,
+    viewMode,
+    resetPriceChartDecorations,
+  ])
 
-  // Update chart data when price data changes
   useEffect(() => {
-    if (viewMode !== 'priceChart' || !priceSeriesRef.current || priceChartData.length === 0) return
+    if (viewMode !== 'priceChart') return
+    if (!priceSeriesRef.current || !priceChartInstanceRef.current) return
+    applyTradeDecorations(buildTradesFromOrders(orders))
+    plotHorizontalLines(buildHorizontalLinesFromOrders(orders))
+  }, [applyTradeDecorations, orders, plotHorizontalLines, viewMode])
 
-    // Data is already formatted as { time, value }
-    const formattedData = priceChartData.map((item) => ({
-      time: item.time || Date.now() / 1000,
-      value: Number(item.value || 0),
-    })).filter(item => item.value > 0) // Filter out invalid data
+  const handlePriceChartIntervalChange = (value) => {
+    if (!value || value === priceChartInterval) return
+    setPriceChartInterval(value)
+  }
 
-    if (formattedData.length > 0) {
-      priceSeriesRef.current.setData(formattedData)
-    }
-  }, [priceChartData, viewMode])
-
-  // Add horizontal lines for waiting sell prices
-  useEffect(() => {
-    if (viewMode !== 'priceChart' || !priceChartInstanceRef.current) return
-
-    const chart = priceChartInstanceRef.current
-    const waitingOrders = orders.filter(o => o?.status === 'WAITING_SELL')
-    
-    // Clear previous waiting lines by storing references
-    // Since lightweight-charts doesn't support removing series directly,
-    // we'll limit to showing only current waiting orders
-    
-    // Only add lines if we don't have them already (simple check)
-    const currentWaitPrices = waitingOrders.map(o => o?.priceWaitSell).filter(Boolean)
-    const existingPrices = waitingLinesRef.current.map(ref => ref?.price)
-    
-    waitingOrders.forEach((order) => {
-      if (order?.priceWaitSell && !existingPrices.includes(order.priceWaitSell)) {
-        try {
-          let waitLineSeries = null
-          if (typeof chart.addLineSeries === 'function') {
-            waitLineSeries = chart.addLineSeries({
-              color: '#ff4444',
-              lineWidth: 1,
-              lineStyle: 2, // Dashed
-              title: `Wait Sell ${order.symbol || ''}`,
-            })
-          } else if (typeof chart.addAreaSeries === 'function') {
-            waitLineSeries = chart.addAreaSeries({
-              lineColor: '#ff4444',
-              topColor: 'rgba(255, 68, 68, 0.1)',
-              bottomColor: 'rgba(255, 68, 68, 0)',
-              lineWidth: 1,
-            })
-          }
-          
-          if (waitLineSeries) {
-            const latestTime = priceChartData.length > 0 
-              ? (priceChartData[priceChartData.length - 1].time || Date.now() / 1000)
-              : Date.now() / 1000
-            waitLineSeries.setData([
-              { time: latestTime - 3600, value: Number(order.priceWaitSell) },
-              { time: latestTime, value: Number(order.priceWaitSell) },
-            ])
-            waitingLinesRef.current.push({ series: waitLineSeries, price: order.priceWaitSell })
-          }
-        } catch (err) {
-          console.error('Error adding wait line:', err)
-        }
+  const handlePriceChartSymbolChange = useCallback(
+    (value) => {
+      if (!value) return
+      const next = value.toUpperCase()
+      if (next === customChartSymbol) return
+      setCustomChartSymbol(next)
+      if (viewMode === 'priceChart') {
+        stopRealtimeFeed()
+        loadInitialCandles(next, { silent: true }).then(() => startRealtimeFeed(next))
       }
-    })
-  }, [orders, viewMode, priceChartData])
-
-  // Update chart when new price data arrives
-  useEffect(() => {
-    if (viewMode === 'priceChart' && priceSeriesRef.current && priceChartData.length > 0) {
-      priceSeriesRef.current.setData(priceChartData.map((item, index) => ({
-        time: item.time || (Date.now() / 1000) - (priceChartData.length - index) * 60,
-        value: Number(item.close || item.price || item.value || 0),
-      })))
-    }
-  }, [priceChartData, viewMode])
-
-  const renderPriceChart = () => (
-    <section className="card">
-      <header>
-        <div>
-          <p className="eyebrow">Price Chart</p>
-          <h3>{getChartSymbol()} - Real-time</h3>
-        </div>
-        <button className="secondary ghost" onClick={fetchPriceData} disabled={priceChartLoading}>
-          {priceChartLoading ? 'Loading...' : 'Refresh'}
-        </button>
-      </header>
-      <div 
-        ref={priceChartContainerRef} 
-        style={{ 
-          width: '100%', 
-          height: '400px',
-          position: 'relative'
-        }}
-      />
-    </section>
+    },
+    [customChartSymbol, loadInitialCandles, startRealtimeFeed, stopRealtimeFeed, viewMode]
   )
+
+  const renderPriceChart = () => {
+    const lastDataPoint = priceChartData.length > 0 ? priceChartData[priceChartData.length - 1] : null
+    const numericLastPrice = lastDataPoint
+      ? Number(lastDataPoint.close ?? lastDataPoint.value ?? lastDataPoint.price ?? 0)
+      : null
+    const lastPrice =
+      numericLastPrice !== null && Number.isFinite(numericLastPrice) ? numericLastPrice.toFixed(4) : null
+    return (
+      <div className="price-chart-full-width">
+        <section className="card price-chart-card">
+          <header className="price-chart-header">
+            <div>
+              <p className="eyebrow">Price Chart</p>
+              <div className="price-chart-symbol-row">
+                <h3>{getChartSymbol()} - Real-time</h3>
+                <select
+                  className="price-chart-symbol-select"
+                  value={customChartSymbol}
+                  onChange={(e) => handlePriceChartSymbolChange(e.target.value)}
+                >
+                  {priceChartSymbolOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {lastPrice && (
+                <p className="eyebrow mono" style={{ marginTop: '4px' }}>
+                  Last Close: {lastPrice}
+                </p>
+              )}
+            </div>
+            <div className="price-chart-header-actions">
+              <div className="price-chart-toolbar" role="group" aria-label="Timeframes">
+                {priceChartIntervalOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`toolbar-chip ${priceChartInterval === option.value ? 'active' : ''}`}
+                    onClick={() => handlePriceChartIntervalChange(option.value)}
+                    aria-pressed={priceChartInterval === option.value}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <button className="secondary ghost" onClick={fetchPriceData} disabled={priceChartLoading}>
+                {priceChartLoading ? 'Loading...' : 'Refresh'}
+              </button>
+            </div>
+          </header>
+          {priceChartError && (
+            <div className="state-block error">
+              ไม่สามารถโหลดกราฟได้: {priceChartError.message || String(priceChartError)}
+            </div>
+          )}
+          <div
+            ref={priceChartContainerRef}
+            className="price-chart-canvas"
+            style={{
+              width: '100%',
+              height: '420px',
+              position: 'relative',
+            }}
+          />
+        </section>
+      </div>
+    )
+  }
 
   const renderCalculate = () => (
     <section className="card">

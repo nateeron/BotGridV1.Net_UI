@@ -509,6 +509,88 @@ button:not(:disabled):hover {
   margin-right: calc(50% - 50vw);
   margin-bottom: 16px;
   background: #05070f;
+  position: relative;
+  z-index: 1;
+}
+
+.price-chart-full-width {
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  margin-bottom: 16px;
+  position: relative;
+  z-index: 5;
+}
+
+.price-chart-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.price-chart-symbol-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.price-chart-symbol-select {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  min-width: 140px;
+}
+
+.price-chart-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.price-chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.toolbar-chip {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  padding: 4px 10px;
+  font-size: 0.85rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.toolbar-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.toolbar-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #041019;
+}
+
+.price-chart-card {
+  position: relative;
+  z-index: 5;
+}
+
+.price-chart-canvas {
+  position: relative;
+  z-index: 5;
 }
 
 .tradingview-widget-copyright {
