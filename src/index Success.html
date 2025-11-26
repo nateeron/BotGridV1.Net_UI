@@ -285,6 +285,7 @@ async function main() {
 
 
     // ---------- Realtime WS ----------
+    console.log(`wss://stream.binance.com:9443/ws/${SYMBOL.toLowerCase()}@kline_${INTERVAL}`);
     const ws = new WebSocket(`wss://stream.binance.com:9443/ws/${SYMBOL.toLowerCase()}@kline_${INTERVAL}`);
     let smoothPrice = null;
 

@@ -2733,6 +2733,73 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  className={`secondary small ${tradeLineSettings?.buttons?.toggleAllLines ? '' : 'ghost'}`}
+                  onClick={() =>
+                    setTradeLineSettings((prev) => ({
+                      ...prev,
+                      buttons: { ...prev?.buttons, toggleAllLines: !prev?.buttons?.toggleAllLines },
+                    }))
+                  }
+                  title="Toggle All Lines Visibility"
+                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                >
+                  👁️ All
+                </button>
+                <button
+                  className={`secondary small ${tradeLineSettings?.buttons?.toggleBuy ? '' : 'ghost'}`}
+                  onClick={() =>
+                    setTradeLineSettings((prev) => ({
+                      ...prev,
+                      buttons: { ...prev?.buttons, toggleBuy: !prev?.buttons?.toggleBuy },
+                    }))
+                  }
+                  title="Toggle Buy-Sell Lines"
+                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                >
+                  Buy-Sell
+                </button>
+                <button
+                  className={`secondary small ${tradeLineSettings?.buttons?.toggleWaitSell ? '' : 'ghost'}`}
+                  onClick={() =>
+                    setTradeLineSettings((prev) => ({
+                      ...prev,
+                      buttons: { ...prev?.buttons, toggleWaitSell: !prev?.buttons?.toggleWaitSell },
+                    }))
+                  }
+                  title="Toggle Wait Sell Lines"
+                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                >
+                  WaitSell
+                </button>
+                <button
+                  className={`secondary small ${tradeLineSettings?.buttons?.toggleNextEntry ? '' : 'ghost'}`}
+                  onClick={() =>
+                    setTradeLineSettings((prev) => ({
+                      ...prev,
+                      buttons: { ...prev?.buttons, toggleNextEntry: !prev?.buttons?.toggleNextEntry },
+                    }))
+                  }
+                  title="Toggle Next Entry Line"
+                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                >
+                  NextEntry
+                </button>
+                <button
+                  className={`secondary small ${tradeLineSettings?.buttons?.toggleNextSell ? '' : 'ghost'}`}
+                  onClick={() =>
+                    setTradeLineSettings((prev) => ({
+                      ...prev,
+                      buttons: { ...prev?.buttons, toggleNextSell: !prev?.buttons?.toggleNextSell },
+                    }))
+                  }
+                  title="Toggle Next Sell Line"
+                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                >
+                  NextSell
+                </button>
+              </div>
               <button
                 className="secondary ghost"
                 onClick={() => setIsTradeLineSettingsModalOpen(true)}
