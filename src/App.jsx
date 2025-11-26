@@ -384,6 +384,7 @@ export default function App() {
     seriesType: 'candlestick',
     chart: null,
     series: null,
+    markersData: [], // Store markers data for re-application
   })
   const ordersRef = useRef([])
   const priceChartIntervalInitializedRef = useRef(false)
@@ -1848,6 +1849,14 @@ export default function App() {
     } else {
       priceSeriesRef.current.setData(toLineSeriesData(data))
     }
+    // Re-apply markers after data update to ensure they stay visible
+    if (engine.markersData && engine.markersData.length > 0) {
+      try {
+        priceSeriesRef.current.setMarkers(engine.markersData)
+      } catch {
+        // ignore errors
+      }
+    }
   }, [])
 
   const updateSeriesPoint = useCallback((point) => {
@@ -1860,6 +1869,14 @@ export default function App() {
         time: point.time,
         value: Number(point.close ?? point.value ?? point.price ?? 0),
       })
+    }
+    // Re-apply markers after point update to ensure they stay visible
+    if (engine.markersData && engine.markersData.length > 0) {
+      try {
+        priceSeriesRef.current.setMarkers(engine.markersData)
+      } catch {
+        // ignore errors
+      }
     }
   }, [])
 
@@ -2100,6 +2117,16 @@ export default function App() {
       })
     }
     engine.lineOverlays = []
+
+    // Clear markers
+    if (candleSeries) {
+      try {
+        candleSeries.setMarkers([])
+      } catch {
+        // ignore
+      }
+    }
+    engine.markersData = []
   }, [])
 
   const applyTradeDecorations = useCallback((orders) => {
@@ -2180,6 +2207,22 @@ export default function App() {
               shape: 'arrowUp',
               text: '',
             })
+          } else if (lineType === 'arrowUpDown') {
+            markers.push({
+              time: buyTime,
+              position: 'belowBar',
+              color: buyColor,
+              shape: 'text',
+              text: '↑',
+            })
+          } else if (lineType === 'triangleUpDown') {
+            markers.push({
+              time: buyTime,
+              position: 'belowBar',
+              color: buyColor,
+              shape: 'text',
+              text: '▲',
+            })
           } else if (lineType === 'point') {
             markers.push({
               time: buyTime,
@@ -2248,6 +2291,22 @@ export default function App() {
               color: sellColor,
               shape: 'arrowDown',
               text: '',
+            })
+          } else if (lineType === 'arrowUpDown') {
+            markers.push({
+              time: sellTime,
+              position: 'aboveBar',
+              color: sellColor,
+              shape: 'text',
+              text: '↓',
+            })
+          } else if (lineType === 'triangleUpDown') {
+            markers.push({
+              time: sellTime,
+              position: 'aboveBar',
+              color: sellColor,
+              shape: 'text',
+              text: '▼',
             })
           } else if (lineType === 'point') {
             markers.push({
@@ -2476,6 +2535,9 @@ export default function App() {
         }
       }
     }
+
+    // Store markers data for re-application when range changes
+    engine.markersData = markers
 
     // Apply markers
     if (markers.length > 0) {
@@ -2716,6 +2778,12 @@ export default function App() {
           if (!logicalRange || logicalRange.from == null) return
           if (logicalRange.from < 5) {
             await loadMoreCandles(resolvedChartSymbol)
+          }
+          // Re-apply markers when range changes to fix disappearing markers issue
+          const candleSeries = priceSeriesRef.current
+          if (candleSeries && engine.markersData && engine.markersData.length > 0) {
+            // Re-apply markers to ensure they stay visible after zoom/pan
+            candleSeries.setMarkers(engine.markersData)
           }
         }
 
@@ -5261,6 +5329,8 @@ export default function App() {
                       >
                         <option value="markers">Markers</option>
                         <option value="arrow">Arrow</option>
+                        <option value="arrowUpDown">↑↓ Arrow Up/Down</option>
+                        <option value="triangleUpDown">▲▼ Triangle Up/Down</option>
                         <option value="point">Point</option>
                         <option value="lineSeries">Line Series</option>
                         <option value="lineSolid">Line Solid</option>
