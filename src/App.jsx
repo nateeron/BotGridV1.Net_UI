@@ -354,7 +354,7 @@ export default function App() {
   const [orderModalData, setOrderModalData] = useState(null)
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
   const [sellModalData, setSellModalData] = useState(null)
-  const [viewMode, setViewMode] = useState(() => loadPrimitiveState('viewMode', 'chart')) // 'chart', 'calculate', 'trade', 'priceChart'
+  const [viewMode, setViewMode] = useState(() => loadPrimitiveState('viewMode', 'priceChart')) // 'chart', 'calculate', 'trade', 'priceChart'
   const [priceChartInterval, setPriceChartInterval] = useState(() =>
     loadPrimitiveState('priceChartInterval', '1m')
   )
@@ -470,14 +470,14 @@ export default function App() {
       buttons: {
         toggleAllLines: true,
         toggleWaitSell: true,
-        toggleBuy: true,
+        toggleBuy: false,
         toggleNextEntry: true,
         toggleNextSell: true,
       },
       styleOptions: ['lineSeries', 'lineSolid', 'dot', 'markers'],
       lines: {
         'buy-Sell': {
-          visible: true,
+          visible: false,
           type: 'markers',
           colorBuy: '#0066FF', // ฟ้า
           colorSell: '#FF55AA', // ชมพู
@@ -2196,6 +2196,8 @@ export default function App() {
           const lineConfig = lines.waitSell
           const lineType = lineConfig?.type || 'dot'
           const lineColor = lineConfig?.color || '#FFA500'
+          const orderId = order?.id || order?.orderBuyID || ''
+          const orderIdText = orderId ? `#${orderId} ` : ''
 
           if (lineType === 'markers') {
             markers.push({
@@ -2203,7 +2205,7 @@ export default function App() {
               position: 'aboveBar',
               color: lineColor,
               shape: 'circle',
-              text: `WaitSell ${waitSellPrice.toFixed(4)}`,
+              text: `${orderIdText}WaitSell ${waitSellPrice.toFixed(4)}`,
             })
           } else if (lineType === 'lineSolid') {
             // เส้นทึบแนวนอนเต็ม
@@ -2213,7 +2215,7 @@ export default function App() {
               lineWidth: 2,
               lineStyle: 0, // solid
               axisLabelVisible: true,
-              title: `WaitSell ${waitSellPrice.toFixed(4)}`,
+              title: `${orderIdText}WaitSell ${waitSellPrice.toFixed(4)}`,
             })
             engine.tradePriceLines.push(priceLine)
           } else if (lineType === 'dot') {
@@ -2224,7 +2226,7 @@ export default function App() {
               lineWidth: 1,
               lineStyle: 1, // dotted
               axisLabelVisible: true,
-              title: `WaitSell ${waitSellPrice.toFixed(4)}`,
+              title: `${orderIdText}WaitSell ${waitSellPrice.toFixed(4)}`,
             })
             engine.tradePriceLines.push(priceLine)
           } else if (lineType === 'lineSeries') {
