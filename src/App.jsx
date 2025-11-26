@@ -1954,6 +1954,7 @@ export default function App() {
     const chart = priceChartInstanceRef.current
     if (!candleSeries || !chart) return
 
+    // Clear all existing price lines
     if (engine.tradePriceLines.length) {
       engine.tradePriceLines.forEach((line) => {
         try {
@@ -1965,6 +1966,7 @@ export default function App() {
       engine.tradePriceLines = []
     }
 
+    // Clear all existing trade overlays
     if (engine.tradeOverlays.length) {
       engine.tradeOverlays.forEach((series) => {
         try {
@@ -1976,90 +1978,10 @@ export default function App() {
       engine.tradeOverlays = []
     }
 
-    if (!Array.isArray(trades) || trades.length === 0) {
-      candleSeries.setMarkers([])
-      return
-    }
-
-    const markers = []
-
-    trades.forEach((trade) => {
-      const entryTimeSec = normalizeTimeSec(trade.time)
-      const exitTimeSec = normalizeTimeSec(trade.exitTime)
-      const entryPrice = Number(trade.price)
-      if (!entryTimeSec || !Number.isFinite(entryPrice)) return
-      const side = (trade.side || 'BUY').toUpperCase()
-      const isBuy = side !== 'SELL'
-
-      markers.push({
-        time: entryTimeSec,
-        position: isBuy ? 'belowBar' : 'aboveBar',
-        color: isBuy ? '#26a69a' : '#ef5350',
-        shape: isBuy ? 'arrowUp' : 'arrowDown',
-        text: `${side} ${entryPrice}`,
-      })
-
-      const entryLine = candleSeries.createPriceLine({
-        price: entryPrice,
-        color: isBuy ? '#26a69a' : '#ef5350',
-        lineWidth: 2,
-        axisLabelVisible: true,
-        title: `${side} ${entryPrice}`,
-      })
-      engine.tradePriceLines.push(entryLine)
-
-      const tpValue = Number(trade.tp)
-      if (Number.isFinite(tpValue) && tpValue > 0) {
-        const tpLine = candleSeries.createPriceLine({
-          price: tpValue,
-          color: '#00ff00',
-          lineWidth: 1,
-          lineStyle: 2,
-          axisLabelVisible: true,
-          title: 'TP',
-        })
-        engine.tradePriceLines.push(tpLine)
-      }
-
-      const slValue = Number(trade.sl)
-      if (Number.isFinite(slValue) && slValue > 0) {
-        const slLine = candleSeries.createPriceLine({
-          price: slValue,
-          color: '#ff4444',
-          lineWidth: 1,
-          lineStyle: 2,
-          axisLabelVisible: true,
-          title: 'SL',
-        })
-        engine.tradePriceLines.push(slLine)
-      }
-
-      if (exitTimeSec && Number.isFinite(trade.exitPrice)) {
-        const pnlPct = isBuy
-          ? ((trade.exitPrice - entryPrice) / entryPrice) * 100
-          : ((entryPrice - trade.exitPrice) / entryPrice) * 100
-        const pnlText = `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%`
-        markers.push({
-          time: exitTimeSec,
-          position: 'aboveBar',
-          color: pnlPct >= 0 ? '#00ff00' : '#ff4444',
-          shape: 'circle',
-          text: `PNL ${pnlText}`,
-        })
-        const connectSeries = chart.addLineSeries({
-          color: pnlPct >= 0 ? '#00ff00' : '#ff4444',
-          lineWidth: 2,
-          priceLineVisible: false,
-        })
-        connectSeries.setData([
-          { time: entryTimeSec, value: entryPrice },
-          { time: exitTimeSec, value: Number(trade.exitPrice) },
-        ])
-        engine.tradeOverlays.push(connectSeries)
-      }
-    })
-
-    candleSeries.setMarkers(markers)
+    // Clear all markers
+    candleSeries.setMarkers([])
+    
+    // Don't create any new decorations - all lines are disabled
   }, [])
 
   const plotHorizontalLines = useCallback((linesData) => {
@@ -2067,6 +1989,7 @@ export default function App() {
     const chart = priceChartInstanceRef.current
     if (!chart) return
 
+    // Clear all existing horizontal lines
     if (engine.lineOverlays.length) {
       engine.lineOverlays.forEach((series) => {
         try {
@@ -2078,34 +2001,7 @@ export default function App() {
       engine.lineOverlays = []
     }
 
-    if (!Array.isArray(linesData) || linesData.length === 0) return
-
-    const convertLineStyle = (style) => {
-      if (typeof style === 'number') {
-        return Math.max(0, Math.min(2, style))
-      }
-      const normalized = String(style || '').toLowerCase()
-      if (normalized === 'solid') return 0
-      if (normalized === 'dotted') return 1
-      return 2
-    }
-
-    linesData.slice(-100).forEach((line) => {
-      const startTimeSec = normalizeTimeSec(line.timestamp)
-      if (!startTimeSec || !Number.isFinite(line.price)) return
-      const endTimeSec = startTimeSec + 60 * 60
-      const series = chart.addLineSeries({
-        color: line.side === 'SELL' ? '#ff88cc' : '#00aaff',
-        lineWidth: 2,
-        lineStyle: convertLineStyle(line.lineStyle),
-        priceLineVisible: false,
-      })
-      series.setData([
-        { time: startTimeSec, value: Number(line.price) },
-        { time: endTimeSec, value: Number(line.price) },
-      ])
-      engine.lineOverlays.push(series)
-    })
+    // Don't create any new horizontal lines - all lines are disabled
   }, [])
 
   const fetchPriceData = useCallback(async () => {
