@@ -2097,6 +2097,7 @@ export default function App() {
     const useMarkers = buyType === 'markers'
     const lineStyleConfig = mapLineStyleConfig(buyType)
     const lengthMode = buyOption.length || 'short'
+    const lengthMinutes = buyOption.lengthMinutes ?? 60
 
     if (engine.tradePriceLines.length) {
       engine.tradePriceLines.forEach((line) => {
@@ -2144,10 +2145,15 @@ export default function App() {
           text: `${side} ${entryPrice}`,
         })
       } else {
+        const baseStart =
+          lengthMode === 'short' ? entryTimeSec - 300 : chartRange.start
+        const baseEnd =
+          lengthMode === 'short' ? entryTimeSec + 300 : chartRange.end
         const { start, end } = getLineLengthRange(
           lengthMode,
-          entryTimeSec - 300,
-          entryTimeSec + 300
+          baseStart,
+          baseEnd,
+          lengthMinutes
         )
         const series = chart.addLineSeries({
           color: isBuy ? buyColor : '#ef5350',
@@ -2214,7 +2220,7 @@ export default function App() {
     })
 
     candleSeries.setMarkers(useMarkers ? markers : [])
-  }, [chartTradeSettings, displayOptions, showAllLines])
+  }, [chartTradeSettings, displayOptions, showAllLines, chartRange])
 
   const plotHorizontalLines = useCallback(
     (linesData) => {
