@@ -2094,12 +2094,23 @@ export default function App() {
               shape: 'arrowUp',
               text: `BUY ${buyPrice.toFixed(4)}${orderIdText}`,
             })
-          } else if (lineType === 'lineSolid' || lineType === 'lineSeries') {
+          } else if (lineType === 'lineSolid') {
+            // เส้นทึบแนวนอนเต็ม
+            const priceLine = candleSeries.createPriceLine({
+              price: buyPrice,
+              color: buyColor,
+              lineWidth: 2,
+              lineStyle: 0, // solid
+              axisLabelVisible: true,
+              title: `BUY ${buyPrice.toFixed(4)}${orderIdText}`,
+            })
+            engine.tradePriceLines.push(priceLine)
+          } else if (lineType === 'lineSeries') {
             const lineSeries = chart.addLineSeries({
               color: buyColor,
               lineWidth: 2,
               priceLineVisible: false,
-              lineStyle: lineType === 'lineSolid' ? 0 : 1,
+              lineStyle: 1,
             })
             const timeSpan = 60 * 60 // 1 hour
             lineSeries.setData([
@@ -2108,11 +2119,12 @@ export default function App() {
             ])
             engine.tradeOverlays.push(lineSeries)
           } else if (lineType === 'dot') {
+            // เส้นจุดแนวนอนเต็ม
             const priceLine = candleSeries.createPriceLine({
               price: buyPrice,
               color: buyColor,
               lineWidth: 1,
-              lineStyle: 1,
+              lineStyle: 1, // dotted
               axisLabelVisible: true,
               title: `BUY ${buyPrice.toFixed(4)}${orderIdText}`,
             })
@@ -2135,12 +2147,23 @@ export default function App() {
               shape: 'arrowDown',
               text: `SELL ${sellPrice.toFixed(4)}${orderIdText}`,
             })
-          } else if (lineType === 'lineSolid' || lineType === 'lineSeries') {
+          } else if (lineType === 'lineSolid') {
+            // เส้นทึบแนวนอนเต็ม
+            const priceLine = candleSeries.createPriceLine({
+              price: sellPrice,
+              color: sellColor,
+              lineWidth: 2,
+              lineStyle: 0, // solid
+              axisLabelVisible: true,
+              title: `SELL ${sellPrice.toFixed(4)}${orderIdText}`,
+            })
+            engine.tradePriceLines.push(priceLine)
+          } else if (lineType === 'lineSeries') {
             const lineSeries = chart.addLineSeries({
               color: sellColor,
               lineWidth: 2,
               priceLineVisible: false,
-              lineStyle: lineType === 'lineSolid' ? 0 : 1,
+              lineStyle: 1,
             })
             const timeSpan = 60 * 60 // 1 hour
             lineSeries.setData([
@@ -2149,11 +2172,12 @@ export default function App() {
             ])
             engine.tradeOverlays.push(lineSeries)
           } else if (lineType === 'dot') {
+            // เส้นจุดแนวนอนเต็ม
             const priceLine = candleSeries.createPriceLine({
               price: sellPrice,
               color: sellColor,
               lineWidth: 1,
-              lineStyle: 1,
+              lineStyle: 1, // dotted
               axisLabelVisible: true,
               title: `SELL ${sellPrice.toFixed(4)}${orderIdText}`,
             })
@@ -2181,13 +2205,35 @@ export default function App() {
               shape: 'circle',
               text: `WaitSell ${waitSellPrice.toFixed(4)}`,
             })
-          } else if (lineType === 'dot' || lineType === 'lineSolid' || lineType === 'lineSeries') {
+          } else if (lineType === 'lineSolid') {
+            // เส้นทึบแนวนอนเต็ม
+            const priceLine = candleSeries.createPriceLine({
+              price: waitSellPrice,
+              color: lineColor,
+              lineWidth: 2,
+              lineStyle: 0, // solid
+              axisLabelVisible: true,
+              title: `WaitSell ${waitSellPrice.toFixed(4)}`,
+            })
+            engine.tradePriceLines.push(priceLine)
+          } else if (lineType === 'dot') {
+            // เส้นจุดแนวนอนเต็ม
+            const priceLine = candleSeries.createPriceLine({
+              price: waitSellPrice,
+              color: lineColor,
+              lineWidth: 1,
+              lineStyle: 1, // dotted
+              axisLabelVisible: true,
+              title: `WaitSell ${waitSellPrice.toFixed(4)}`,
+            })
+            engine.tradePriceLines.push(priceLine)
+          } else if (lineType === 'lineSeries') {
             const timeSpan = 60 * 60 * 24 // 24 hours
             const lineSeries = chart.addLineSeries({
               color: lineColor,
               lineWidth: 2,
               priceLineVisible: false,
-              lineStyle: lineType === 'dot' || lineType === 'lineSolid' ? 1 : 1,
+              lineStyle: 1,
             })
             lineSeries.setData([
               { time: buyTime, value: waitSellPrice },
@@ -2215,7 +2261,29 @@ export default function App() {
           shape: 'circle',
           text: `NextEntry ${nextEntryPrice.toFixed(4)}`,
         })
-      } else if (lineType === 'dot' || lineType === 'lineSolid' || lineType === 'lineSeries') {
+      } else if (lineType === 'lineSolid') {
+        // เส้นทึบแนวนอนเต็ม
+        const priceLine = candleSeries.createPriceLine({
+          price: nextEntryPrice,
+          color: lineColor,
+          lineWidth: 2,
+          lineStyle: 0, // solid
+          axisLabelVisible: true,
+          title: `NextEntry ${nextEntryPrice.toFixed(4)}`,
+        })
+        engine.tradePriceLines.push(priceLine)
+      } else if (lineType === 'dot') {
+        // เส้นจุดแนวนอนเต็ม
+        const priceLine = candleSeries.createPriceLine({
+          price: nextEntryPrice,
+          color: lineColor,
+          lineWidth: 1,
+          lineStyle: 1, // dotted
+          axisLabelVisible: true,
+          title: `NextEntry ${nextEntryPrice.toFixed(4)}`,
+        })
+        engine.tradePriceLines.push(priceLine)
+      } else if (lineType === 'lineSeries') {
         const lineSeries = chart.addLineSeries({
           color: lineColor,
           lineWidth: 2,
@@ -2256,7 +2324,29 @@ export default function App() {
               shape: 'circle',
               text: `NextSell ${waitSellPrice.toFixed(4)}`,
             })
-          } else if (lineType === 'dot' || lineType === 'lineSolid' || lineType === 'lineSeries') {
+          } else if (lineType === 'lineSolid') {
+            // เส้นทึบแนวนอนเต็ม
+            const priceLine = candleSeries.createPriceLine({
+              price: waitSellPrice,
+              color: lineColor,
+              lineWidth: 2,
+              lineStyle: 0, // solid
+              axisLabelVisible: true,
+              title: `NextSell ${waitSellPrice.toFixed(4)}`,
+            })
+            engine.tradePriceLines.push(priceLine)
+          } else if (lineType === 'dot') {
+            // เส้นจุดแนวนอนเต็ม
+            const priceLine = candleSeries.createPriceLine({
+              price: waitSellPrice,
+              color: lineColor,
+              lineWidth: 1,
+              lineStyle: 1, // dotted
+              axisLabelVisible: true,
+              title: `NextSell ${waitSellPrice.toFixed(4)}`,
+            })
+            engine.tradePriceLines.push(priceLine)
+          } else if (lineType === 'lineSeries') {
             const lineSeries = chart.addLineSeries({
               color: lineColor,
               lineWidth: 2,
