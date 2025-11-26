@@ -403,6 +403,13 @@ export default function App() {
   const [cal1, setCal1] = useState(() => loadPrimitiveState('cal1', ''))
   const [cal2, setCal2] = useState(() => loadPrimitiveState('cal2', ''))
   const [percentInput, setPercentInput] = useState(() => loadPrimitiveState('percentInput', '100'))
+  const [calculateMode, setCalculateMode] = useState(() => loadPrimitiveState('calculateMode', 'basic')) // 'basic', 'percentage' or 'order'
+  const [percentPerStep, setPercentPerStep] = useState(() => loadPrimitiveState('percentPerStep', '0.29125'))
+  const [steps, setSteps] = useState(() => loadPrimitiveState('steps', '24'))
+  const [totalPercentResult, setTotalPercentResult] = useState('')
+  const [percentPerStep2, setPercentPerStep2] = useState(() => loadPrimitiveState('percentPerStep2', '0.29125'))
+  const [targetPercent, setTargetPercent] = useState(() => loadPrimitiveState('targetPercent', '90'))
+  const [stepsResult, setStepsResult] = useState('')
   const [tradeForm, setTradeForm] = useState(() => loadObjectState('tradeForm', defaultTradeForm))
   const [tradeLoading, setTradeLoading] = useState(false)
   const [isTradeVerificationOpen, setIsTradeVerificationOpen] = useState(false)
@@ -929,6 +936,31 @@ export default function App() {
     if (typeof window === 'undefined') return
     sessionStorage.setItem('percentInput', percentInput)
   }, [percentInput])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('calculateMode', calculateMode)
+  }, [calculateMode])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('percentPerStep', percentPerStep)
+  }, [percentPerStep])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('steps', steps)
+  }, [steps])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('percentPerStep2', percentPerStep2)
+  }, [percentPerStep2])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('targetPercent', targetPercent)
+  }, [targetPercent])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -1751,6 +1783,28 @@ export default function App() {
     }
   }
 
+  // Calculate Total Percent from steps
+  const calcTotalPercent = () => {
+    const perStep = parseFloat(percentPerStep || '0')
+    const stepsNum = parseFloat(steps || '0')
+    const totalPercent = perStep * stepsNum
+    const resultText = `เปอร์เซ็นต์ต่อไม้: ${perStep.toFixed(5)} %\nจำนวนไม้: ${stepsNum}\nเปอร์เซ็นต์รวม ≈ ${totalPercent.toFixed(4)} %`
+    setTotalPercentResult(resultText)
+  }
+
+  // Calculate Steps from target percent
+  const calcSteps = () => {
+    const perStep = parseFloat(percentPerStep2 || '0')
+    const target = parseFloat(targetPercent || '0')
+    if (perStep === 0) {
+      setStepsResult('กรุณาใส่เปอร์เซ็นต์ต่อไม้มากกว่า 0')
+      return
+    }
+    const stepsNum = target / perStep
+    const resultText = `เปอร์เซ็นต์ต่อไม้: ${perStep.toFixed(5)} %\nต้องการเปอร์เซ็นต์รวม: ${target.toFixed(2)} %\nจำนวนไม้ที่ต้องใช้ (ทฤษฎี) ≈ ${stepsNum.toFixed(2)} ไม้\nปัดขึ้นเป็นจำนวนเต็ม: ${Math.ceil(stepsNum)} ไม้`
+    setStepsResult(resultText)
+  }
+
   const removeAlert = (alertId) => {
     setAlerts((prev) => prev.filter((alert) => alert.id !== alertId))
   }
@@ -1985,24 +2039,31 @@ export default function App() {
     const lastOrder = sortedOrders[0]
     if (!lastOrder) return null
 
+    // Get PERCEN_BUY from settings
+    const orderSettingId = lastOrder.setting_ID ?? lastOrder.settingId ?? lastOrder.settingID
+    const relatedSetting = settings.find((s) => s.id === orderSettingId || s.id === String(orderSettingId))
+    const percenBuy = relatedSetting
+      ? Number(relatedSetting.perceN_BUY ?? relatedSetting.PERCEN_BUY ?? 0)
+      : Number(settings[0]?.perceN_BUY ?? settings[0]?.PERCEN_BUY ?? 0.4) || 0.4
+
     const status = String(lastOrder.status || '').toUpperCase()
     const buyPrice = Number(lastOrder.priceBuy ?? 0)
     const sellPrice = Number(lastOrder.priceSellActual ?? 0)
 
     if (status === 'WAITING_SELL') {
-      // nextEntry = BuyPrice - (BuyPrice * 0.4 / 100)
+      // nextEntry = BuyPrice - (BuyPrice * PERCEN_BUY / 100)
       if (buyPrice > 0) {
-        return buyPrice - (buyPrice * 0.4 / 100)
+        return buyPrice - (buyPrice * percenBuy / 100)
       }
     } else if (status === 'SOLD') {
-      // nextEntry = SellPrice - (SellPrice * 0.4 / 100)
+      // nextEntry = SellPrice - (SellPrice * PERCEN_BUY / 100)
       if (sellPrice > 0) {
-        return sellPrice - (sellPrice * 0.4 / 100)
+        return sellPrice - (sellPrice * percenBuy / 100)
       }
     }
 
     return null
-  }, [])
+  }, [settings])
 
   const resetPriceChartDecorations = useCallback(() => {
     const engine = priceChartEngineRef.current
@@ -2047,9 +2108,9 @@ export default function App() {
     const chart = priceChartInstanceRef.current
     if (!candleSeries || !chart) return
 
-    const settings = tradeLineSettings || {}
-    const lines = settings.lines || {}
-    const buttons = settings.buttons || {}
+    const lineSettings = tradeLineSettings || {}
+    const lines = lineSettings.lines || {}
+    const buttons = lineSettings.buttons || {}
 
     // Clear all existing price lines
     if (engine.tradePriceLines.length) {
@@ -2856,127 +2917,232 @@ export default function App() {
       <header>
         <div>
           <p className="eyebrow">Calculator</p>
-          <h3>Calculate Percentage</h3>
+          <h3>Calculate</h3>
         </div>
       </header>
-      <div className="form-grid">
-        <label>
-          Cal 1
-          <input
-            type="number"
-            step="0.0001"
-            value={cal1}
-            onChange={(e) => setCal1(e.target.value)}
-            placeholder="Enter value"
-          />
-        </label>
-        <label>
-          Cal 2
-          <input
-            type="number"
-            step="0.0001"
-            value={cal2}
-            onChange={(e) => setCal2(e.target.value)}
-            placeholder="Enter value"
-          />
-        </label>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', borderBottom: '1px solid var(--border)', paddingBottom: '8px', flexWrap: 'wrap' }}>
+        <button
+          className={`secondary ${calculateMode === 'basic' ? '' : 'ghost'}`}
+          onClick={() => setCalculateMode('basic')}
+          style={{ fontSize: '14px', padding: '8px 16px' }}
+        >
+          Basic Calculate
+        </button>
+        <button
+          className={`secondary ${calculateMode === 'percentage' ? '' : 'ghost'}`}
+          onClick={() => setCalculateMode('percentage')}
+          style={{ fontSize: '14px', padding: '8px 16px' }}
+        >
+          Calculate Percentage
+        </button>
+        <button
+          className={`secondary ${calculateMode === 'order' ? '' : 'ghost'}`}
+          onClick={() => setCalculateMode('order')}
+          style={{ fontSize: '14px', padding: '8px 16px' }}
+        >
+          Calculate Order
+        </button>
       </div>
 
-      <div className="calculate-results">
-        <div className="result-item">
-          <span className="result-label">Sum 1 - Cal1 to Cal2 = ? %</span>
-          <span className="result-value">{calculateSum1()}</span>
-        </div>
-        <div className="result-item">
-          <span className="result-label">Sum 2 - Cal1 as % of Cal2 = ? %</span>
-          <span className="result-value">{calculateSum2()}</span>
-        </div>
-        <div className="result-item">
-          <label>
-            <div style={{ minWidth: '120px' }}> % (0-100)</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
-              <div className="range-slider-container" style={{ flex: 1 }}>
-                <input
-                  type="range"
-                  min="0"
-                  max="10000"
-                  step="1"
-                  value={percentInput ? Math.round(Number(percentInput) * 100) : 0}
-                  onChange={(e) => {
-                    const value = Number(e.target.value) / 100
-                    setPercentInput(value.toFixed(2))
-                  }}
-                  className="range-slider"
-                />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="100"
-                  value={percentInput || ''}
-                  onChange={(e) => {
-                    let value = e.target.value
-                    if (value === '') {
-                      setPercentInput('')
-                      return
-                    }
-                    const numValue = Number(value)
-                    if (!isNaN(numValue)) {
-                      if (numValue < 0) {
-                        setPercentInput('0')
-                      } else if (numValue > 100) {
-                        setPercentInput('100')
-                      } else {
-                        setPercentInput(value)
-                      }
-                    }
-                  }}
-                  onBlur={(e) => {
-                    const numValue = Number(e.target.value)
-                    if (!isNaN(numValue) && e.target.value !== '') {
-                      setPercentInput(numValue.toFixed(2))
-                    } else if (e.target.value === '') {
-                      setPercentInput('100')
-                    }
-                  }}
-                  placeholder="0-100"
-                  style={{
-                    width: '80px',
-                    padding: '6px 8px',
-                    borderRadius: 'var(--radius)',
-                    border: '1px solid var(--border)',
-                    background: 'var(--surface)',
-                    color: 'var(--text)',
-                    fontSize: '13px',
-                    textAlign: 'center'
-                  }}
-                />
-                <span style={{ 
-                  fontSize: '13px', 
-                  color: 'var(--text-muted)',
-                  minWidth: '30px'
-                }}>
-                  {percentInput ? Number(percentInput).toFixed(2) : '0.00'}%
-                </span>
-              </div>
+      {/* Tab Content: Basic Calculate (เดิม) */}
+      {calculateMode === 'basic' && (
+        <div>
+          <div className="form-grid">
+            <label>
+              Cal 1
+              <input
+                type="number"
+                step="0.0001"
+                value={cal1}
+                onChange={(e) => setCal1(e.target.value)}
+                placeholder="Enter value"
+              />
+            </label>
+            <label>
+              Cal 2
+              <input
+                type="number"
+                step="0.0001"
+                value={cal2}
+                onChange={(e) => setCal2(e.target.value)}
+                placeholder="Enter value"
+              />
+            </label>
+          </div>
+
+          <div className="calculate-results">
+            <div className="result-item">
+              <span className="result-label">Sum 1 - Cal1 to Cal2 = ? %</span>
+              <span className="result-value">{calculateSum1()}</span>
             </div>
-          </label>
+            <div className="result-item">
+              <span className="result-label">Sum 2 - Cal1 as % of Cal2 = ? %</span>
+              <span className="result-value">{calculateSum2()}</span>
+            </div>
+            <div className="result-item">
+              <label>
+                <div style={{ minWidth: '120px' }}> % (0-100)</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+                  <div className="range-slider-container" style={{ flex: 1 }}>
+                    <input
+                      type="range"
+                      min="0"
+                      max="10000"
+                      step="1"
+                      value={percentInput ? Math.round(Number(percentInput) * 100) : 0}
+                      onChange={(e) => {
+                        const value = Number(e.target.value) / 100
+                        setPercentInput(value.toFixed(2))
+                      }}
+                      className="range-slider"
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      value={percentInput || ''}
+                      onChange={(e) => {
+                        let value = e.target.value
+                        if (value === '') {
+                          setPercentInput('')
+                          return
+                        }
+                        const numValue = Number(value)
+                        if (!isNaN(numValue)) {
+                          if (numValue < 0) {
+                            setPercentInput('0')
+                          } else if (numValue > 100) {
+                            setPercentInput('100')
+                          } else {
+                            setPercentInput(value)
+                          }
+                        }
+                      }}
+                      onBlur={(e) => {
+                        const numValue = Number(e.target.value)
+                        if (!isNaN(numValue) && e.target.value !== '') {
+                          setPercentInput(numValue.toFixed(2))
+                        } else if (e.target.value === '') {
+                          setPercentInput('100')
+                        }
+                      }}
+                      placeholder="0-100"
+                      style={{
+                        width: '80px',
+                        padding: '6px 8px',
+                        borderRadius: 'var(--radius)',
+                        border: '1px solid var(--border)',
+                        background: 'var(--surface)',
+                        color: 'var(--text)',
+                        fontSize: '13px',
+                        textAlign: 'center'
+                      }}
+                    />
+                    <span style={{ 
+                      fontSize: '13px', 
+                      color: 'var(--text-muted)',
+                      minWidth: '30px'
+                    }}>
+                      {percentInput ? Number(percentInput).toFixed(2) : '0.00'}%
+                    </span>
+                  </div>
+                </div>
+              </label>
+            </div>
+            <div className="result-item">
+              <span className="result-label">Sum 3 - Cal1 - % = ?</span>
+              <span className="result-value">{calculateSum3().minus}</span>
+            </div>
+            <div className="result-item">
+              <span className="result-label">Sum 3 - Cal1 + % = ?</span>
+              <span className="result-value">{calculateSum3().plus}</span>
+            </div>
+            <div className="result-item">
+              <span className="result-label">Sum 4 - % of Cal1 = ?</span>
+              <span className="result-value">{calculateSum4()}</span>
+            </div>
+          </div>
         </div>
-        <div className="result-item">
-          <span className="result-label">Sum 3 - Cal1 - % = ?</span>
-          <span className="result-value">{calculateSum3().minus}</span>
+      )}
+
+      {/* Tab Content: Calculate Percentage */}
+      {calculateMode === 'percentage' && (
+        <div>
+          <h3 style={{ marginBottom: '16px', fontSize: '16px' }}>1) คิด % รวมจาก จำนวนไม้</h3>
+          <div className="form-grid">
+            <label>
+              เปอร์เซ็นต์ต่อไม้ (% ต่อ 1 ไม้)
+              <input
+                type="number"
+                step="0.00001"
+                value={percentPerStep}
+                onChange={(e) => setPercentPerStep(e.target.value)}
+                placeholder="0.29125"
+              />
+            </label>
+            <label>
+              จำนวนไม้
+              <input
+                type="number"
+                step="1"
+                value={steps}
+                onChange={(e) => setSteps(e.target.value)}
+                placeholder="24"
+              />
+            </label>
+          </div>
+          <button className="primary" onClick={calcTotalPercent} style={{ marginTop: '12px' }}>
+            คำนวณเปอร์เซ็นต์รวม
+          </button>
+          {totalPercentResult && (
+            <div className="state-block" style={{ marginTop: '16px', whiteSpace: 'pre-line', padding: '12px' }}>
+              {totalPercentResult}
+            </div>
+          )}
         </div>
-        <div className="result-item">
-          <span className="result-label">Sum 3 - Cal1 + % = ?</span>
-          <span className="result-value">{calculateSum3().plus}</span>
+      )}
+
+      {/* Tab Content: Calculate Order */}
+      {calculateMode === 'order' && (
+        <div>
+          <h3 style={{ marginBottom: '16px', fontSize: '16px' }}>2) คิด จำนวนไม้ จาก % รวมที่ต้องการ</h3>
+          <div className="form-grid">
+            <label>
+              เปอร์เซ็นต์ต่อไม้ (% ต่อ 1 ไม้)
+              <input
+                type="number"
+                step="0.00001"
+                value={percentPerStep2}
+                onChange={(e) => setPercentPerStep2(e.target.value)}
+                placeholder="0.29125"
+              />
+            </label>
+            <label>
+              เปอร์เซ็นต์รวมที่ต้องการ (%)
+              <input
+                type="number"
+                step="0.01"
+                value={targetPercent}
+                onChange={(e) => setTargetPercent(e.target.value)}
+                placeholder="90"
+              />
+            </label>
+          </div>
+          <button className="primary" onClick={calcSteps} style={{ marginTop: '12px' }}>
+            คำนวณจำนวนไม้ที่ต้องใช้
+          </button>
+          {stepsResult && (
+            <div className="state-block" style={{ marginTop: '16px', whiteSpace: 'pre-line', padding: '12px' }}>
+              {stepsResult}
+            </div>
+          )}
         </div>
-        <div className="result-item">
-          <span className="result-label">Sum 4 - % of Cal1 = ?</span>
-          <span className="result-value">{calculateSum4()}</span>
-        </div>
-      </div>
+      )}
     </section>
   )
 
