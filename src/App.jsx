@@ -138,6 +138,71 @@ const defaultFilledOrdersForm = {
   Limit: 25,
 }
 
+const chartStyleTypes = ['lineSeries', 'lineSolid', 'dot', 'markers']
+
+const defaultChartTradeSettings = {
+  global: {
+    hideShowAllLines: true,
+  },
+  displayOptions: {
+    waitSellPrice: {
+      label: 'Wait Sell Price',
+      visible: true,
+      type: 'lineSeries',
+      color: '#FF9900',
+      length: 'short',
+    },
+    buyPoints: {
+      label: 'Buy Points',
+      visible: true,
+      type: 'markers',
+      color: '#26A69A',
+      length: 'short',
+    },
+    nextEntry: {
+      label: 'Next Entry',
+      visible: true,
+      type: 'dot',
+      color: '#0066FF',
+      calculation: {
+        description: 'Based on last order',
+        formulaIfWaitingSell: 'BuyPrice - (BuyPrice * 0.4 / 100)',
+        formulaIfSold: 'SellPrice - (SellPrice * 0.4 / 100)',
+      },
+    },
+    nextSell: {
+      label: 'Next Sell',
+      visible: true,
+      type: 'dot',
+      color: '#FF55AA',
+      calculation: {
+        description: 'Use WAITING_SELL Wait Sell Price',
+        formula: 'WaitSellPrice',
+      },
+    },
+  },
+  styleTypes: chartStyleTypes,
+}
+
+const overlayDefaultColors = {
+  waitSellPrice: '#FF9900',
+  buyPoints: '#26A69A',
+  nextEntry: '#0066FF',
+  nextSell: '#FF55AA',
+}
+
+const getLineLengthRange = (lengthMode, defaultStart, defaultEnd, minutes = 60) => {
+  if (lengthMode === 'full') {
+    return { start: defaultStart, end: defaultEnd }
+  }
+  if (lengthMode === 'custom') {
+    const span = Math.max(1, minutes) * 60
+    const center = (defaultStart + defaultEnd) / 2
+    return { start: center - span / 2, end: center + span / 2 }
+  }
+  return { start: defaultStart, end: defaultEnd }
+}
+
 const LIGHTWEIGHT_CHARTS_CDN =
   'https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js'
 
@@ -314,7 +379,10 @@ const buildTradesFromOrders = (orders = []) => {
 const buildHorizontalLinesFromOrders = (orders = []) => {
   if (!Array.isArray(orders)) return []
   return orders
-    .filter((order) => Number(order?.priceWaitSell) > 0)
+    .filter((order) => {
+      const status = String(order?.status || '').toUpperCase()
+      return status === 'WAITING_SELL' && Number(order?.priceWaitSell) > 0
+    })
     .map((order) => {
       const timestamp =
         parseTimestamp(order.dateBuy) ??
@@ -324,8 +392,8 @@ const buildHorizontalLinesFromOrders = (orders = []) => {
       return {
         timestamp,
         price: Number(order.priceWaitSell),
-        side: String(order.side ?? order.orderSide ?? order.status ?? '').toUpperCase().includes('SELL') ? 'SELL' : 'BUY',
-        lineStyle: order.status === 'WAITING_SELL' ? 'dashed' : 'dotted',
+        side: 'SELL',
+        lineStyle: 'dotted',
       }
     })
     .filter((line) => line.timestamp && Number.isFinite(line.price))
@@ -361,7 +429,28 @@ export default function App() {
   const [customChartSymbol, setCustomChartSymbol] = useState(() =>
     loadPrimitiveState('customChartSymbol', 'XRPUSDT')
   )
+  const [chartTradeSettings, setChartTradeSettings] = useState(() =>
+    loadObjectState('chartTradeSettings', defaultChartTradeSettings)
+  )
+  const [isChartSettingsOpen, setIsChartSettingsOpen] = useState(false)
   const [priceChartData, setPriceChartData] = useState([])
+  const chartRange = useMemo(() => {
+    if (!priceChartData.length) {
+      const now = Math.floor(Date.now() / 1000)
+      return {
+        start: now - 3600,
+        end: now,
+      }
+    }
+    const start = priceChartData[0]?.time ?? Math.floor(Date.now() / 1000) - 3600
+    const last = priceChartData[priceChartData.length - 1]
+    const end =
+      last?.time ?? start + (last?.value ? 60 : 3600)
+    return {
+      start,
+      end: Math.max(end, start + 60),
+    }
+  }, [priceChartData])
   const [priceChartLoading, setPriceChartLoading] = useState(false)
   const [priceChartError, setPriceChartError] = useState(null)
   const priceChartContainerRef = useRef(null)
@@ -395,6 +484,46 @@ export default function App() {
     ],
     []
   )
+  const priceChartOverlayButtons = useMemo(
+    () => [
+      { key: 'waitSellPrice', label: 'Wait Sell Price' },
+      { key: 'buyPoints', label: 'Buy Points' },
+      { key: 'nextEntry', label: 'Next Entry' },
+      { key: 'nextSell', label: 'Next Sell' },
+    ],
+    []
+  )
+  const overlayTypeOptions = useMemo(
+    () => [
+      { value: 'lineSeries', label: 'Line Series' },
+      { value: 'lineSolid', label: 'Line Solid' },
+      { value: 'dot', label: 'Dot Line' },
+      { value: 'markers', label: 'Markers' },
+    ],
+    []
+  )
+  const displayOptions = chartTradeSettings.displayOptions || {}
+  const showAllLines = chartTradeSettings.global?.hideShowAllLines !== false
+  const isOptionEnabled = (key) => (displayOptions[key]?.visible ?? true)
+  const isOptionActive = (key) => showAllLines && isOptionEnabled(key)
+  const getOptionColor = (key, fallback) =>
+    displayOptions[key]?.color || overlayDefaultColors[key] || fallback
+  const getOptionType = (key, fallback = 'dot') =>
+    displayOptions[key]?.type || fallback
+  const mapLineStyleConfig = (type) => {
+    switch ((type || '').toLowerCase()) {
+      case 'lineseries':
+        return { lineStyle: 0, lineWidth: 3 }
+      case 'linesolid':
+      case 'solidline':
+        return { lineStyle: 0, lineWidth: 2 }
+      case 'dot':
+      case 'linedot':
+        return { lineStyle: 1, lineWidth: 2 }
+      default:
+        return { lineStyle: 0, lineWidth: 2 }
+    }
+  }
   const [cal1, setCal1] = useState(() => loadPrimitiveState('cal1', ''))
   const [cal2, setCal2] = useState(() => loadPrimitiveState('cal2', ''))
   const [percentInput, setPercentInput] = useState(() => loadPrimitiveState('percentInput', '100'))
@@ -868,6 +997,11 @@ export default function App() {
     if (typeof window === 'undefined') return
     sessionStorage.setItem('customChartSymbol', customChartSymbol)
   }, [customChartSymbol])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('chartTradeSettings', JSON.stringify(chartTradeSettings))
+  }, [chartTradeSettings])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -1937,9 +2071,11 @@ export default function App() {
     engine.tradeOverlays = []
 
     if (engine.chart && engine.lineOverlays.length) {
-      engine.lineOverlays.forEach((series) => {
+      engine.lineOverlays.forEach((overlay) => {
         try {
-          engine.chart.removeSeries(series)
+          if (overlay?.series) {
+            engine.chart.removeSeries(overlay.series)
+          }
         } catch {
           // ignore
         }
@@ -1953,6 +2089,14 @@ export default function App() {
     const candleSeries = priceSeriesRef.current
     const chart = priceChartInstanceRef.current
     if (!candleSeries || !chart) return
+
+    const buyOption = displayOptions.buyPoints || {}
+    const showTrades = isOptionActive('buyPoints')
+    const buyType = (buyOption.type || 'markers').toLowerCase()
+    const buyColor = getOptionColor('buyPoints', '#26A69A')
+    const useMarkers = buyType === 'markers'
+    const lineStyleConfig = mapLineStyleConfig(buyType)
+    const lengthMode = buyOption.length || 'short'
 
     if (engine.tradePriceLines.length) {
       engine.tradePriceLines.forEach((line) => {
@@ -1976,7 +2120,7 @@ export default function App() {
       engine.tradeOverlays = []
     }
 
-    if (!Array.isArray(trades) || trades.length === 0) {
+    if (!showTrades || !Array.isArray(trades) || trades.length === 0) {
       candleSeries.setMarkers([])
       return
     }
@@ -1991,22 +2135,32 @@ export default function App() {
       const side = (trade.side || 'BUY').toUpperCase()
       const isBuy = side !== 'SELL'
 
-      markers.push({
-        time: entryTimeSec,
-        position: isBuy ? 'belowBar' : 'aboveBar',
-        color: isBuy ? '#26a69a' : '#ef5350',
-        shape: isBuy ? 'arrowUp' : 'arrowDown',
-        text: `${side} ${entryPrice}`,
-      })
-
-      const entryLine = candleSeries.createPriceLine({
-        price: entryPrice,
-        color: isBuy ? '#26a69a' : '#ef5350',
-        lineWidth: 2,
-        axisLabelVisible: true,
-        title: `${side} ${entryPrice}`,
-      })
-      engine.tradePriceLines.push(entryLine)
+      if (useMarkers) {
+        markers.push({
+          time: entryTimeSec,
+          position: isBuy ? 'belowBar' : 'aboveBar',
+          color: isBuy ? buyColor : '#ef5350',
+          shape: isBuy ? 'arrowUp' : 'arrowDown',
+          text: `${side} ${entryPrice}`,
+        })
+      } else {
+        const { start, end } = getLineLengthRange(
+          lengthMode,
+          entryTimeSec - 300,
+          entryTimeSec + 300
+        )
+        const series = chart.addLineSeries({
+          color: isBuy ? buyColor : '#ef5350',
+          lineWidth: lineStyleConfig.lineWidth,
+          lineStyle: lineStyleConfig.lineStyle,
+          priceLineVisible: false,
+        })
+        series.setData([
+          { time: start, value: entryPrice },
+          { time: end, value: entryPrice },
+        ])
+        engine.tradePriceLines.push({ series, kind: 'buyPoints' })
+      }
 
       const tpValue = Number(trade.tp)
       if (Number.isFinite(tpValue) && tpValue > 0) {
@@ -2059,54 +2213,171 @@ export default function App() {
       }
     })
 
-    candleSeries.setMarkers(markers)
-  }, [])
+    candleSeries.setMarkers(useMarkers ? markers : [])
+  }, [chartTradeSettings, displayOptions, showAllLines])
 
-  const plotHorizontalLines = useCallback((linesData) => {
+  const plotHorizontalLines = useCallback(
+    (linesData) => {
+      const engine = priceChartEngineRef.current
+      const chart = priceChartInstanceRef.current
+      if (!chart) return
+
+      if (engine.lineOverlays.length) {
+        engine.lineOverlays = engine.lineOverlays.filter((overlay) => {
+          if (overlay?.kind === 'waitSell' && overlay?.series) {
+            try {
+              chart.removeSeries(overlay.series)
+            } catch {
+              // ignore
+            }
+            return false
+          }
+          return true
+        })
+      }
+
+      const waitSellOption = displayOptions.waitSellPrice || {}
+      const waitType = (waitSellOption.type || 'lineSeries').toLowerCase()
+      const waitColor = getOptionColor('waitSellPrice', '#FF9900')
+      const showWaitSell = isOptionActive('waitSellPrice')
+      if (!showWaitSell || !Array.isArray(linesData) || linesData.length === 0) return
+
+      const styleConfig = mapLineStyleConfig(waitType === 'markers' ? 'dot' : waitType)
+
+      linesData.slice(-100).forEach((line) => {
+        const startTimeSec = normalizeTimeSec(line.timestamp)
+        if (!startTimeSec || !Number.isFinite(line.price)) return
+        const endTimeSec = startTimeSec + 60 * 60
+        const { start, end } = getLineLengthRange(
+          waitSellOption.length || 'short',
+          startTimeSec,
+          endTimeSec
+        )
+        const series = chart.addLineSeries({
+          color: waitColor,
+          lineWidth: styleConfig.lineWidth,
+          lineStyle: styleConfig.lineStyle,
+          priceLineVisible: false,
+        })
+        series.setData([
+          { time: start, value: Number(line.price) },
+          { time: end, value: Number(line.price) },
+        ])
+        engine.lineOverlays.push({ series, kind: 'waitSell' })
+      })
+    },
+    [chartTradeSettings, displayOptions, showAllLines]
+  )
+
+  const updateProjectedLines = useCallback(() => {
     const engine = priceChartEngineRef.current
     const chart = priceChartInstanceRef.current
-    if (!chart) return
+    if (!chart || viewMode !== 'priceChart') return
 
     if (engine.lineOverlays.length) {
-      engine.lineOverlays.forEach((series) => {
-        try {
-          chart.removeSeries(series)
-        } catch {
-          // ignore
+      engine.lineOverlays = engine.lineOverlays.filter((overlay) => {
+        if (
+          (overlay?.kind === 'nextEntry' || overlay?.kind === 'nextSell') &&
+          overlay?.series
+        ) {
+          try {
+            chart.removeSeries(overlay.series)
+          } catch {
+            // ignore
+          }
+          return false
         }
+        return true
       })
-      engine.lineOverlays = []
     }
 
-    if (!Array.isArray(linesData) || linesData.length === 0) return
+    if (!showAllLines) return
 
-    const convertLineStyle = (style) => {
-      if (typeof style === 'number') {
-        return Math.max(0, Math.min(2, style))
+    const startTime =
+      priceChartData[0]?.time ?? Math.floor(Date.now() / 1000) - 3600
+    let endTime =
+      priceChartData[priceChartData.length - 1]?.time ??
+      Math.floor(Date.now() / 1000)
+    if (endTime <= startTime) {
+      endTime = startTime + 3600
+    }
+
+    const addProjectedLine = (price, optionKey) => {
+      if (!Number.isFinite(price) || price <= 0) return
+      const optionType = (getOptionType(optionKey, 'dot') || 'dot').toLowerCase()
+      const color = getOptionColor(optionKey, '#00d1ff')
+      let series = null
+
+      if (optionType === 'markers') {
+        series = chart.addLineSeries({
+          color,
+          lineWidth: 1,
+          lineStyle: 0,
+          priceLineVisible: false,
+        })
+        series.setData([
+          { time: startTime, value: Number(price) },
+          { time: endTime, value: Number(price) },
+        ])
+        series.setMarkers?.([
+          {
+            time: startTime,
+            position: 'aboveBar',
+            color,
+            shape: 'circle',
+            text: optionKey === 'nextSell' ? 'Sell' : 'Buy',
+          },
+          {
+            time: endTime,
+            position: 'aboveBar',
+            color,
+            shape: 'circle',
+            text: '',
+          },
+        ])
+      } else {
+        const styleConfig = mapLineStyleConfig(optionType)
+        series = chart.addLineSeries({
+          color,
+          lineWidth: styleConfig.lineWidth,
+          lineStyle: styleConfig.lineStyle,
+          priceLineVisible: false,
+        })
+        series.setData([
+          { time: startTime, value: Number(price) },
+          { time: endTime, value: Number(price) },
+        ])
       }
-      const normalized = String(style || '').toLowerCase()
-      if (normalized === 'solid') return 0
-      if (normalized === 'dotted') return 1
-      return 2
+
+      if (series) {
+        engine.lineOverlays.push({ series, kind: optionKey })
+      }
     }
 
-    linesData.slice(-100).forEach((line) => {
-      const startTimeSec = normalizeTimeSec(line.timestamp)
-      if (!startTimeSec || !Number.isFinite(line.price)) return
-      const endTimeSec = startTimeSec + 60 * 60
-      const series = chart.addLineSeries({
-        color: line.side === 'SELL' ? '#ff88cc' : '#00aaff',
-        lineWidth: 2,
-        lineStyle: convertLineStyle(line.lineStyle),
-        priceLineVisible: false,
-      })
-      series.setData([
-        { time: startTimeSec, value: Number(line.price) },
-        { time: endTimeSec, value: Number(line.price) },
-      ])
-      engine.lineOverlays.push(series)
-    })
-  }, [])
+    const latestOrder = orders?.length ? orders[0] : null
+    if (isOptionActive('nextEntry') && latestOrder) {
+      let basePrice = null
+      if ((latestOrder.status || '').toUpperCase() === 'WAITING_SELL') {
+        basePrice = Number(latestOrder.priceBuy ?? latestOrder.price)
+      } else if ((latestOrder.status || '').toUpperCase() === 'SOLD') {
+        basePrice = Number(latestOrder.priceSellActual ?? latestOrder.priceSell)
+      }
+      if (Number.isFinite(basePrice) && basePrice > 0) {
+        const nextEntryPrice = basePrice - (basePrice * 0.4) / 100
+        addProjectedLine(nextEntryPrice, 'nextEntry')
+      }
+    }
+
+    if (isOptionActive('nextSell')) {
+      const waitingOrder = orders?.find(
+        (order) => (order.status || '').toUpperCase() === 'WAITING_SELL'
+      )
+      const waitSellPrice = Number(waitingOrder?.priceWaitSell)
+      if (Number.isFinite(waitSellPrice) && waitSellPrice > 0) {
+        addProjectedLine(waitSellPrice, 'nextSell')
+      }
+    }
+  }, [chartTradeSettings, displayOptions, orders, priceChartData, showAllLines, viewMode])
 
   const fetchPriceData = useCallback(async () => {
     if (viewMode !== 'priceChart') return
@@ -2384,7 +2655,14 @@ export default function App() {
     if (!priceSeriesRef.current || !priceChartInstanceRef.current) return
     applyTradeDecorations(buildTradesFromOrders(orders))
     plotHorizontalLines(buildHorizontalLinesFromOrders(orders))
-  }, [applyTradeDecorations, orders, plotHorizontalLines, viewMode])
+    updateProjectedLines()
+  }, [
+    applyTradeDecorations,
+    orders,
+    plotHorizontalLines,
+    updateProjectedLines,
+    viewMode,
+  ])
 
   const handlePriceChartIntervalChange = (value) => {
     if (!value || value === priceChartInterval) return
@@ -2404,6 +2682,58 @@ export default function App() {
     },
     [customChartSymbol, loadInitialCandles, startRealtimeFeed, stopRealtimeFeed, viewMode]
   )
+
+  const updateDisplayOption = useCallback((key, updater) => {
+    setChartTradeSettings((prev) => {
+      const options = prev.displayOptions || {}
+      const current = options[key] || {}
+      const nextOption =
+        typeof updater === 'function'
+          ? updater(current)
+          : { ...current, ...updater }
+      return {
+        ...prev,
+        displayOptions: {
+          ...options,
+          [key]: nextOption,
+        },
+      }
+    })
+  }, [])
+
+  const toggleOverlayVisibility = (key) => {
+    if (key === 'all') {
+      setChartTradeSettings((prev) => ({
+        ...prev,
+        global: {
+          ...prev.global,
+          hideShowAllLines: !(prev.global?.hideShowAllLines ?? true),
+        },
+      }))
+      return
+    }
+    updateDisplayOption(key, (current) => ({
+      ...current,
+      visible: !(current?.visible ?? true),
+    }))
+  }
+
+  const handleLineStyleChange = (target, field, value) => {
+    updateDisplayOption(target, (current) => ({
+      ...current,
+      [field]: value,
+    }))
+  }
+
+  const handleCalculationChange = (target, field, value) => {
+    updateDisplayOption(target, (current) => ({
+      ...current,
+      calculation: {
+        ...current.calculation,
+        [field]: value,
+      },
+    }))
+  }
 
   const renderPriceChart = () => {
     const lastDataPoint = priceChartData.length > 0 ? priceChartData[priceChartData.length - 1] : null
@@ -2454,6 +2784,15 @@ export default function App() {
               </div>
               <button className="secondary ghost" onClick={fetchPriceData} disabled={priceChartLoading}>
                 {priceChartLoading ? 'Loading...' : 'Refresh'}
+              </button>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => setIsChartSettingsOpen(true)}
+                aria-label="Chart settings"
+                title="Chart settings"
+              >
+                ⚙️
               </button>
             </div>
           </header>
@@ -3974,6 +4313,93 @@ export default function App() {
         )}
         {activeTab === 'settings' && renderSettings()}
       </main>
+
+      {isChartSettingsOpen && (
+        <div className="modal-backdrop" onClick={() => setIsChartSettingsOpen(false)}>
+          <div className="modal chart-settings-modal" onClick={(e) => e.stopPropagation()}>
+            <header className="chart-settings-header">
+              <h3>Price Chart Settings</h3>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="Close chart settings"
+                onClick={() => setIsChartSettingsOpen(false)}
+              >
+                ✕
+              </button>
+            </header>
+            <div className="chart-settings-section">
+              <label className="chart-settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={chartTradeSettings.global?.hideShowAllLines !== false}
+                  onChange={() => toggleOverlayVisibility('all')}
+                />
+                <span>Show all lines</span>
+              </label>
+            </div>
+            <div className="chart-settings-grid">
+              {priceChartOverlayButtons.map((btn) => {
+                const option = displayOptions[btn.key] || {}
+                const optionEnabled = isOptionEnabled(btn.key)
+                const typeValue = option.type || 'dot'
+                const colorValue =
+                  option.color || overlayDefaultColors[btn.key] || '#00d1ff'
+                const styleChoices =
+                  chartTradeSettings.styleTypes || chartStyleTypes
+                return (
+                  <div key={btn.key} className="chart-settings-option">
+                    <div className="chart-settings-option-header">
+                      <h4>{btn.label}</h4>
+                      <label className="chart-settings-toggle">
+                        <input
+                          type="checkbox"
+                          checked={optionEnabled}
+                          onChange={() => toggleOverlayVisibility(btn.key)}
+                        />
+                        <span>{optionEnabled ? 'Visible' : 'Hidden'}</span>
+                      </label>
+                    </div>
+                    <div className="chart-settings-option-controls">
+                      <select
+                        className="chart-settings-style-select"
+                        value={typeValue}
+                        onChange={(e) =>
+                          handleLineStyleChange(btn.key, 'type', e.target.value)
+                        }
+                      >
+                        {styleChoices.map((optionType) => (
+                          <option key={optionType} value={optionType}>
+                            {optionType === 'lineSeries'
+                              ? 'Line Series'
+                              : optionType === 'lineSolid'
+                              ? 'Solid Line'
+                              : optionType === 'dot'
+                              ? 'Dot Line'
+                              : 'Markers'}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="color"
+                        value={colorValue}
+                        onChange={(e) =>
+                          handleLineStyleChange(btn.key, 'color', e.target.value)
+                        }
+                      />
+                    </div>
+                    {option.calculation?.description && (
+                      <p className="chart-settings-note">
+                        {option.calculation.description}
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {isSettingModalOpen && modalSetting && (
         <div className="modal-backdrop" onClick={closeSettingModal}>
