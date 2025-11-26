@@ -2111,6 +2111,7 @@ export default function App() {
     const lineSettings = tradeLineSettings || {}
     const lines = lineSettings.lines || {}
     const buttons = lineSettings.buttons || {}
+    const chartData = priceChartData || engine.allData || []
 
     // Clear all existing price lines
     if (engine.tradePriceLines.length) {
@@ -2171,6 +2172,22 @@ export default function App() {
               shape: 'arrowUp',
               text: `BUY ${buyPrice.toFixed(4)}${orderIdText}`,
             })
+          } else if (lineType === 'arrow') {
+            markers.push({
+              time: buyTime,
+              position: 'belowBar',
+              color: buyColor,
+              shape: 'arrowUp',
+              text: '',
+            })
+          } else if (lineType === 'point') {
+            markers.push({
+              time: buyTime,
+              position: 'belowBar',
+              color: buyColor,
+              shape: 'circle',
+              text: '',
+            })
           } else if (lineType === 'lineSolid') {
             // เส้นทึบแนวนอนเต็ม
             const priceLine = candleSeries.createPriceLine({
@@ -2223,6 +2240,22 @@ export default function App() {
               color: sellColor,
               shape: 'arrowDown',
               text: `SELL ${sellPrice.toFixed(4)}${orderIdText}`,
+            })
+          } else if (lineType === 'arrow') {
+            markers.push({
+              time: sellTime,
+              position: 'aboveBar',
+              color: sellColor,
+              shape: 'arrowDown',
+              text: '',
+            })
+          } else if (lineType === 'point') {
+            markers.push({
+              time: sellTime,
+              position: 'aboveBar',
+              color: sellColor,
+              shape: 'circle',
+              text: '',
             })
           } else if (lineType === 'lineSolid') {
             // เส้นทึบแนวนอนเต็ม
@@ -5227,6 +5260,8 @@ export default function App() {
                         style={{ padding: '4px 8px', fontSize: '12px', minWidth: '100px' }}
                       >
                         <option value="markers">Markers</option>
+                        <option value="arrow">Arrow</option>
+                        <option value="point">Point</option>
                         <option value="lineSeries">Line Series</option>
                         <option value="lineSolid">Line Solid</option>
                         <option value="dot">Dot</option>
