@@ -464,6 +464,47 @@ export default function App() {
   const [backupJsonText, setBackupJsonText] = useState('')
   const [backupReplaceExisting, setBackupReplaceExisting] = useState(true)
   const [backupLoading, setBackupLoading] = useState(false)
+  const [isTradeLineSettingsModalOpen, setIsTradeLineSettingsModalOpen] = useState(false)
+  const [tradeLineSettings, setTradeLineSettings] = useState(() =>
+    loadObjectState('tradeLineSettings', {
+      buttons: {
+        toggleAllLines: true,
+        toggleWaitSell: true,
+        toggleBuy: true,
+        toggleNextEntry: true,
+        toggleNextSell: true,
+      },
+      styleOptions: ['lineSeries', 'lineSolid', 'dot', 'markers'],
+      lines: {
+        'buy-Sell': {
+          visible: true,
+          type: 'markers',
+          colorBuy: '#0066FF', // ฟ้า
+          colorSell: '#FF55AA', // ชมพู
+        },
+        waitSell: {
+          visible: true,
+          type: 'dot',
+          color: '#FFA500',
+        },
+        nextEntry: {
+          visible: true,
+          type: 'dot',
+          color: '#0066FF',
+          formula: {
+            WAITING_SELL: 'Buy - (Buy * 0.4 / 100)',
+            SOLD: 'Sell - (Sell * 0.4 / 100)',
+          },
+        },
+        nextSell: {
+          visible: true,
+          type: 'dot',
+          color: '#FF55AA',
+          formula: 'WaitSellPrice',
+        },
+      },
+    })
+  )
   const emptySettingTemplate = useMemo(
     () => ({
       id: null,
@@ -912,6 +953,11 @@ export default function App() {
     if (typeof window === 'undefined') return
     sessionStorage.setItem('filledOrdersForm', JSON.stringify(filledOrdersForm))
   }, [filledOrdersForm])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('tradeLineSettings', JSON.stringify(tradeLineSettings))
+  }, [tradeLineSettings])
 
   useEffect(() => {
     if (!reportConfigId) return
@@ -1911,6 +1957,37 @@ export default function App() {
     viewMode,
   ])
 
+  const calculateNextEntry = useCallback((orders) => {
+    if (!Array.isArray(orders) || orders.length === 0) return null
+
+    // Find last order (most recent)
+    const sortedOrders = [...orders].sort((a, b) => {
+      const timeA = parseTimestamp(a.dateBuy ?? a.createTime)
+      const timeB = parseTimestamp(b.dateBuy ?? b.createTime)
+      return (timeB || 0) - (timeA || 0)
+    })
+    const lastOrder = sortedOrders[0]
+    if (!lastOrder) return null
+
+    const status = String(lastOrder.status || '').toUpperCase()
+    const buyPrice = Number(lastOrder.priceBuy ?? 0)
+    const sellPrice = Number(lastOrder.priceSellActual ?? 0)
+
+    if (status === 'WAITING_SELL') {
+      // nextEntry = BuyPrice - (BuyPrice * 0.4 / 100)
+      if (buyPrice > 0) {
+        return buyPrice - (buyPrice * 0.4 / 100)
+      }
+    } else if (status === 'SOLD') {
+      // nextEntry = SellPrice - (SellPrice * 0.4 / 100)
+      if (sellPrice > 0) {
+        return sellPrice - (sellPrice * 0.4 / 100)
+      }
+    }
+
+    return null
+  }, [])
+
   const resetPriceChartDecorations = useCallback(() => {
     const engine = priceChartEngineRef.current
     const candleSeries = priceSeriesRef.current
@@ -1948,11 +2025,15 @@ export default function App() {
     engine.lineOverlays = []
   }, [])
 
-  const applyTradeDecorations = useCallback((trades) => {
+  const applyTradeDecorations = useCallback((orders) => {
     const engine = priceChartEngineRef.current
     const candleSeries = priceSeriesRef.current
     const chart = priceChartInstanceRef.current
     if (!candleSeries || !chart) return
+
+    const settings = tradeLineSettings || {}
+    const lines = settings.lines || {}
+    const buttons = settings.buttons || {}
 
     // Clear all existing price lines
     if (engine.tradePriceLines.length) {
@@ -1978,11 +2059,225 @@ export default function App() {
       engine.tradeOverlays = []
     }
 
-    // Clear all markers
+    // Clear all markers first
     candleSeries.setMarkers([])
-    
-    // Don't create any new decorations - all lines are disabled
-  }, [])
+
+    // Check if all lines are toggled off
+    if (!buttons.toggleAllLines) return
+
+    if (!Array.isArray(orders) || orders.length === 0) return
+
+    const markers = []
+    const waitSellOrders = orders.filter((o) => String(o?.status || '').toUpperCase() === 'WAITING_SELL')
+    const nextEntryPrice = calculateNextEntry(orders)
+
+    // Plot Buy-Sell markers/lines
+    if (buttons.toggleBuy && lines['buy-Sell']?.visible) {
+      orders.forEach((order) => {
+        const buyPrice = Number(order.priceBuy ?? 0)
+        const sellPrice = Number(order.priceSellActual ?? 0)
+        const buyTime = normalizeTimeSec(order.dateBuy ?? order.createTime)
+        const sellTime = normalizeTimeSec(order.dateSell ?? order.updateTime)
+
+        if (buyPrice > 0 && buyTime) {
+          const lineConfig = lines['buy-Sell']
+          const lineType = lineConfig?.type || 'markers'
+          const buyColor = lineConfig?.colorBuy || '#0066FF' // ฟ้า
+          const orderId = order?.id || order?.orderBuyID || ''
+          const orderIdText = orderId ? ` #${orderId}` : ''
+
+          if (lineType === 'markers') {
+            markers.push({
+              time: buyTime,
+              position: 'belowBar',
+              color: buyColor,
+              shape: 'arrowUp',
+              text: `BUY ${buyPrice.toFixed(4)}${orderIdText}`,
+            })
+          } else if (lineType === 'lineSolid' || lineType === 'lineSeries') {
+            const lineSeries = chart.addLineSeries({
+              color: buyColor,
+              lineWidth: 2,
+              priceLineVisible: false,
+              lineStyle: lineType === 'lineSolid' ? 0 : 1,
+            })
+            const timeSpan = 60 * 60 // 1 hour
+            lineSeries.setData([
+              { time: buyTime, value: buyPrice },
+              { time: buyTime + timeSpan, value: buyPrice },
+            ])
+            engine.tradeOverlays.push(lineSeries)
+          } else if (lineType === 'dot') {
+            const priceLine = candleSeries.createPriceLine({
+              price: buyPrice,
+              color: buyColor,
+              lineWidth: 1,
+              lineStyle: 1,
+              axisLabelVisible: true,
+              title: `BUY ${buyPrice.toFixed(4)}${orderIdText}`,
+            })
+            engine.tradePriceLines.push(priceLine)
+          }
+        }
+
+        if (sellPrice > 0 && sellTime) {
+          const lineConfig = lines['buy-Sell']
+          const lineType = lineConfig?.type || 'markers'
+          const sellColor = lineConfig?.colorSell || '#FF55AA' // ชมพู
+          const orderId = order?.id || order?.orderBuyID || ''
+          const orderIdText = orderId ? ` #${orderId}` : ''
+
+          if (lineType === 'markers') {
+            markers.push({
+              time: sellTime,
+              position: 'aboveBar',
+              color: sellColor,
+              shape: 'arrowDown',
+              text: `SELL ${sellPrice.toFixed(4)}${orderIdText}`,
+            })
+          } else if (lineType === 'lineSolid' || lineType === 'lineSeries') {
+            const lineSeries = chart.addLineSeries({
+              color: sellColor,
+              lineWidth: 2,
+              priceLineVisible: false,
+              lineStyle: lineType === 'lineSolid' ? 0 : 1,
+            })
+            const timeSpan = 60 * 60 // 1 hour
+            lineSeries.setData([
+              { time: sellTime, value: sellPrice },
+              { time: sellTime + timeSpan, value: sellPrice },
+            ])
+            engine.tradeOverlays.push(lineSeries)
+          } else if (lineType === 'dot') {
+            const priceLine = candleSeries.createPriceLine({
+              price: sellPrice,
+              color: sellColor,
+              lineWidth: 1,
+              lineStyle: 1,
+              axisLabelVisible: true,
+              title: `SELL ${sellPrice.toFixed(4)}${orderIdText}`,
+            })
+            engine.tradePriceLines.push(priceLine)
+          }
+        }
+      })
+    }
+
+    // Plot WaitSell lines
+    if (buttons.toggleWaitSell && lines.waitSell?.visible) {
+      waitSellOrders.forEach((order) => {
+        const waitSellPrice = Number(order.priceWaitSell ?? 0)
+        const buyTime = normalizeTimeSec(order.dateBuy ?? order.createTime)
+        if (waitSellPrice > 0 && buyTime) {
+          const lineConfig = lines.waitSell
+          const lineType = lineConfig?.type || 'dot'
+          const lineColor = lineConfig?.color || '#FFA500'
+
+          if (lineType === 'markers') {
+            markers.push({
+              time: buyTime,
+              position: 'aboveBar',
+              color: lineColor,
+              shape: 'circle',
+              text: `WaitSell ${waitSellPrice.toFixed(4)}`,
+            })
+          } else if (lineType === 'dot' || lineType === 'lineSolid' || lineType === 'lineSeries') {
+            const timeSpan = 60 * 60 * 24 // 24 hours
+            const lineSeries = chart.addLineSeries({
+              color: lineColor,
+              lineWidth: 2,
+              priceLineVisible: false,
+              lineStyle: lineType === 'dot' || lineType === 'lineSolid' ? 1 : 1,
+            })
+            lineSeries.setData([
+              { time: buyTime, value: waitSellPrice },
+              { time: buyTime + timeSpan, value: waitSellPrice },
+            ])
+            engine.tradeOverlays.push(lineSeries)
+          }
+        }
+      })
+    }
+
+    // Plot NextEntry
+    if (buttons.toggleNextEntry && lines.nextEntry?.visible && nextEntryPrice !== null) {
+      const lineConfig = lines.nextEntry
+      const lineType = lineConfig?.type || 'dot'
+      const lineColor = lineConfig?.color || '#0066FF'
+      const currentTime = Math.floor(Date.now() / 1000)
+      const timeSpan = 60 * 60 * 24 // 24 hours
+
+      if (lineType === 'markers') {
+        markers.push({
+          time: currentTime,
+          position: 'belowBar',
+          color: lineColor,
+          shape: 'circle',
+          text: `NextEntry ${nextEntryPrice.toFixed(4)}`,
+        })
+      } else if (lineType === 'dot' || lineType === 'lineSolid' || lineType === 'lineSeries') {
+        const lineSeries = chart.addLineSeries({
+          color: lineColor,
+          lineWidth: 2,
+          priceLineVisible: false,
+          lineStyle: 1,
+        })
+        lineSeries.setData([
+          { time: currentTime, value: nextEntryPrice },
+          { time: currentTime + timeSpan, value: nextEntryPrice },
+        ])
+        engine.tradeOverlays.push(lineSeries)
+      }
+    }
+
+    // Plot NextSell (WaitSellPrice from WAITING_SELL orders)
+    if (buttons.toggleNextSell && lines.nextSell?.visible) {
+      // Find the most recent WAITING_SELL order
+      const sortedWaitSellOrders = [...waitSellOrders].sort((a, b) => {
+        const timeA = parseTimestamp(a.dateBuy ?? a.createTime)
+        const timeB = parseTimestamp(b.dateBuy ?? b.createTime)
+        return (timeB || 0) - (timeA || 0)
+      })
+      const lastWaitSellOrder = sortedWaitSellOrders[0]
+      if (lastWaitSellOrder) {
+        const waitSellPrice = Number(lastWaitSellOrder.priceWaitSell ?? 0)
+        if (waitSellPrice > 0) {
+          const lineConfig = lines.nextSell
+          const lineType = lineConfig?.type || 'dot'
+          const lineColor = lineConfig?.color || '#FF55AA'
+          const buyTime = normalizeTimeSec(lastWaitSellOrder.dateBuy ?? lastWaitSellOrder.createTime) || Math.floor(Date.now() / 1000)
+          const timeSpan = 60 * 60 * 24 // 24 hours
+
+          if (lineType === 'markers') {
+            markers.push({
+              time: buyTime,
+              position: 'aboveBar',
+              color: lineColor,
+              shape: 'circle',
+              text: `NextSell ${waitSellPrice.toFixed(4)}`,
+            })
+          } else if (lineType === 'dot' || lineType === 'lineSolid' || lineType === 'lineSeries') {
+            const lineSeries = chart.addLineSeries({
+              color: lineColor,
+              lineWidth: 2,
+              priceLineVisible: false,
+              lineStyle: 1,
+            })
+            lineSeries.setData([
+              { time: buyTime, value: waitSellPrice },
+              { time: buyTime + timeSpan, value: waitSellPrice },
+            ])
+            engine.tradeOverlays.push(lineSeries)
+          }
+        }
+      }
+    }
+
+    // Apply markers
+    if (markers.length > 0) {
+      candleSeries.setMarkers(markers)
+    }
+  }, [tradeLineSettings, calculateNextEntry])
 
   const plotHorizontalLines = useCallback((linesData) => {
     const engine = priceChartEngineRef.current
@@ -2209,7 +2504,7 @@ export default function App() {
         engine.earliestTimeMs = null
 
         await loadInitialCandles(resolvedChartSymbol)
-        applyTradeDecorations(buildTradesFromOrders(ordersRef.current))
+        applyTradeDecorations(ordersRef.current)
         plotHorizontalLines(buildHorizontalLinesFromOrders(ordersRef.current))
         startRealtimeFeed(resolvedChartSymbol)
 
@@ -2278,9 +2573,9 @@ export default function App() {
   useEffect(() => {
     if (viewMode !== 'priceChart') return
     if (!priceSeriesRef.current || !priceChartInstanceRef.current) return
-    applyTradeDecorations(buildTradesFromOrders(orders))
+    applyTradeDecorations(orders)
     plotHorizontalLines(buildHorizontalLinesFromOrders(orders))
-  }, [applyTradeDecorations, orders, plotHorizontalLines, viewMode])
+  }, [applyTradeDecorations, orders, plotHorizontalLines, viewMode, tradeLineSettings])
 
   const handlePriceChartIntervalChange = (value) => {
     if (!value || value === priceChartInterval) return
@@ -2348,6 +2643,13 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              <button
+                className="secondary ghost"
+                onClick={() => setIsTradeLineSettingsModalOpen(true)}
+                title="Trade Line Settings"
+              >
+                ⚙
+              </button>
               <button className="secondary ghost" onClick={fetchPriceData} disabled={priceChartLoading}>
                 {priceChartLoading ? 'Loading...' : 'Refresh'}
               </button>
@@ -4323,6 +4625,373 @@ export default function App() {
             {renderAlertLogs()}
             <div className="button-group" style={{ marginTop: '16px' }}>
               <button className="secondary ghost" type="button" onClick={() => setShowAlertLogs(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Trade Line Settings Modal */}
+      {isTradeLineSettingsModalOpen && (
+        <div className="modal-backdrop" onClick={() => setIsTradeLineSettingsModalOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
+            <header>
+              <h3>Trade Line Settings</h3>
+            </header>
+            <div style={{ padding: '16px' }}>
+              {/* Toggle All Lines */}
+              <div style={{ marginBottom: '24px', padding: '12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                  <input
+                    type="checkbox"
+                    checked={tradeLineSettings?.buttons?.toggleAllLines ?? true}
+                    onChange={(e) =>
+                      setTradeLineSettings((prev) => ({
+                        ...prev,
+                        buttons: { ...prev?.buttons, toggleAllLines: e.target.checked },
+                      }))
+                    }
+                  />
+                  <strong>Toggle All Lines</strong>
+                </label>
+              </div>
+
+              {/* Buy-Sell Line */}
+              {tradeLineSettings?.buttons?.toggleBuy !== false && (
+                <div style={{ marginBottom: '12px', padding: '10px', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <strong style={{ minWidth: '80px', fontSize: '14px' }}>Buy-Sell</strong>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                      <span style={{ fontSize: '11px', opacity: 0.7 }}>Type</span>
+                      <select
+                        value={tradeLineSettings?.lines?.['buy-Sell']?.type || 'markers'}
+                        onChange={(e) =>
+                          setTradeLineSettings((prev) => ({
+                            ...prev,
+                            lines: {
+                              ...prev?.lines,
+                              'buy-Sell': { ...prev?.lines?.['buy-Sell'], type: e.target.value },
+                            },
+                          }))
+                        }
+                        style={{ padding: '4px 8px', fontSize: '12px', minWidth: '100px' }}
+                      >
+                        <option value="markers">Markers</option>
+                        <option value="lineSeries">Line Series</option>
+                        <option value="lineSolid">Line Solid</option>
+                        <option value="dot">Dot</option>
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                      <span style={{ fontSize: '11px', opacity: 0.7 }}>Buy Color</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div
+                          style={{
+                            width: '24px',
+                            height: '24px',
+                            borderRadius: '50%',
+                            backgroundColor: tradeLineSettings?.lines?.['buy-Sell']?.colorBuy || '#0066FF',
+                            border: '2px solid var(--border)',
+                            flexShrink: 0,
+                          }}
+                        />
+                        <input
+                          type="color"
+                          value={tradeLineSettings?.lines?.['buy-Sell']?.colorBuy || '#0066FF'}
+                          onChange={(e) =>
+                            setTradeLineSettings((prev) => ({
+                              ...prev,
+                              lines: {
+                                ...prev?.lines,
+                                'buy-Sell': { ...prev?.lines?.['buy-Sell'], colorBuy: e.target.value },
+                              },
+                            }))
+                          }
+                          style={{ width: '40px', height: '28px', cursor: 'pointer' }}
+                        />
+                      </div>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                      <span style={{ fontSize: '11px', opacity: 0.7 }}>Sell Color</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div
+                          style={{
+                            width: '24px',
+                            height: '24px',
+                            borderRadius: '50%',
+                            backgroundColor: tradeLineSettings?.lines?.['buy-Sell']?.colorSell || '#FF55AA',
+                            border: '2px solid var(--border)',
+                            flexShrink: 0,
+                          }}
+                        />
+                        <input
+                          type="color"
+                          value={tradeLineSettings?.lines?.['buy-Sell']?.colorSell || '#FF55AA'}
+                          onChange={(e) =>
+                            setTradeLineSettings((prev) => ({
+                              ...prev,
+                              lines: {
+                                ...prev?.lines,
+                                'buy-Sell': { ...prev?.lines?.['buy-Sell'], colorSell: e.target.value },
+                              },
+                            }))
+                          }
+                          style={{ width: '40px', height: '28px', cursor: 'pointer' }}
+                        />
+                      </div>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto' }}>
+                      <input
+                        type="checkbox"
+                        checked={tradeLineSettings?.lines?.['buy-Sell']?.visible ?? true}
+                        onChange={(e) =>
+                          setTradeLineSettings((prev) => ({
+                            ...prev,
+                            lines: {
+                              ...prev?.lines,
+                              'buy-Sell': { ...prev?.lines?.['buy-Sell'], visible: e.target.checked },
+                            },
+                          }))
+                        }
+                      />
+                      <span style={{ fontSize: '12px' }}>Visible</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* WaitSell Line */}
+              {tradeLineSettings?.buttons?.toggleWaitSell !== false && (
+                <div style={{ marginBottom: '12px', padding: '10px', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <strong style={{ minWidth: '80px', fontSize: '14px' }}>Wait Sell</strong>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                      <span style={{ fontSize: '11px', opacity: 0.7 }}>Type</span>
+                      <select
+                        value={tradeLineSettings?.lines?.waitSell?.type || 'dot'}
+                        onChange={(e) =>
+                          setTradeLineSettings((prev) => ({
+                            ...prev,
+                            lines: {
+                              ...prev?.lines,
+                              waitSell: { ...prev?.lines?.waitSell, type: e.target.value },
+                            },
+                          }))
+                        }
+                        style={{ padding: '4px 8px', fontSize: '12px', minWidth: '100px' }}
+                      >
+                        <option value="markers">Markers</option>
+                        <option value="lineSeries">Line Series</option>
+                        <option value="lineSolid">Line Solid</option>
+                        <option value="dot">Dot</option>
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                      <span style={{ fontSize: '11px', opacity: 0.7 }}>Color</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div
+                          style={{
+                            width: '24px',
+                            height: '24px',
+                            borderRadius: '50%',
+                            backgroundColor: tradeLineSettings?.lines?.waitSell?.color || '#FFA500',
+                            border: '2px solid var(--border)',
+                            flexShrink: 0,
+                          }}
+                        />
+                        <input
+                          type="color"
+                          value={tradeLineSettings?.lines?.waitSell?.color || '#FFA500'}
+                          onChange={(e) =>
+                            setTradeLineSettings((prev) => ({
+                              ...prev,
+                              lines: {
+                                ...prev?.lines,
+                                waitSell: { ...prev?.lines?.waitSell, color: e.target.value },
+                              },
+                            }))
+                          }
+                          style={{ width: '40px', height: '28px', cursor: 'pointer' }}
+                        />
+                      </div>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto' }}>
+                      <input
+                        type="checkbox"
+                        checked={tradeLineSettings?.lines?.waitSell?.visible ?? true}
+                        onChange={(e) =>
+                          setTradeLineSettings((prev) => ({
+                            ...prev,
+                            lines: {
+                              ...prev?.lines,
+                              waitSell: { ...prev?.lines?.waitSell, visible: e.target.checked },
+                            },
+                          }))
+                        }
+                      />
+                      <span style={{ fontSize: '12px' }}>Visible</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* NextEntry Line */}
+              {tradeLineSettings?.buttons?.toggleNextEntry !== false && (
+                <div style={{ marginBottom: '12px', padding: '10px', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <strong style={{ minWidth: '80px', fontSize: '14px' }}>Next Entry</strong>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                      <span style={{ fontSize: '11px', opacity: 0.7 }}>Type</span>
+                      <select
+                        value={tradeLineSettings?.lines?.nextEntry?.type || 'dot'}
+                        onChange={(e) =>
+                          setTradeLineSettings((prev) => ({
+                            ...prev,
+                            lines: {
+                              ...prev?.lines,
+                              nextEntry: { ...prev?.lines?.nextEntry, type: e.target.value },
+                            },
+                          }))
+                        }
+                        style={{ padding: '4px 8px', fontSize: '12px', minWidth: '100px' }}
+                      >
+                        <option value="markers">Markers</option>
+                        <option value="lineSeries">Line Series</option>
+                        <option value="lineSolid">Line Solid</option>
+                        <option value="dot">Dot</option>
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                      <span style={{ fontSize: '11px', opacity: 0.7 }}>Color</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div
+                          style={{
+                            width: '24px',
+                            height: '24px',
+                            borderRadius: '50%',
+                            backgroundColor: tradeLineSettings?.lines?.nextEntry?.color || '#0066FF',
+                            border: '2px solid var(--border)',
+                            flexShrink: 0,
+                          }}
+                        />
+                        <input
+                          type="color"
+                          value={tradeLineSettings?.lines?.nextEntry?.color || '#0066FF'}
+                          onChange={(e) =>
+                            setTradeLineSettings((prev) => ({
+                              ...prev,
+                              lines: {
+                                ...prev?.lines,
+                                nextEntry: { ...prev?.lines?.nextEntry, color: e.target.value },
+                              },
+                            }))
+                          }
+                          style={{ width: '40px', height: '28px', cursor: 'pointer' }}
+                        />
+                      </div>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto' }}>
+                      <input
+                        type="checkbox"
+                        checked={tradeLineSettings?.lines?.nextEntry?.visible ?? true}
+                        onChange={(e) =>
+                          setTradeLineSettings((prev) => ({
+                            ...prev,
+                            lines: {
+                              ...prev?.lines,
+                              nextEntry: { ...prev?.lines?.nextEntry, visible: e.target.checked },
+                            },
+                          }))
+                        }
+                      />
+                      <span style={{ fontSize: '12px' }}>Visible</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* NextSell Line */}
+              {tradeLineSettings?.buttons?.toggleNextSell !== false && (
+                <div style={{ marginBottom: '12px', padding: '10px', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <strong style={{ minWidth: '80px', fontSize: '14px' }}>Next Sell</strong>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                      <span style={{ fontSize: '11px', opacity: 0.7 }}>Type</span>
+                      <select
+                        value={tradeLineSettings?.lines?.nextSell?.type || 'dot'}
+                        onChange={(e) =>
+                          setTradeLineSettings((prev) => ({
+                            ...prev,
+                            lines: {
+                              ...prev?.lines,
+                              nextSell: { ...prev?.lines?.nextSell, type: e.target.value },
+                            },
+                          }))
+                        }
+                        style={{ padding: '4px 8px', fontSize: '12px', minWidth: '100px' }}
+                      >
+                        <option value="markers">Markers</option>
+                        <option value="lineSeries">Line Series</option>
+                        <option value="lineSolid">Line Solid</option>
+                        <option value="dot">Dot</option>
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                      <span style={{ fontSize: '11px', opacity: 0.7 }}>Color</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div
+                          style={{
+                            width: '24px',
+                            height: '24px',
+                            borderRadius: '50%',
+                            backgroundColor: tradeLineSettings?.lines?.nextSell?.color || '#FF55AA',
+                            border: '2px solid var(--border)',
+                            flexShrink: 0,
+                          }}
+                        />
+                        <input
+                          type="color"
+                          value={tradeLineSettings?.lines?.nextSell?.color || '#FF55AA'}
+                          onChange={(e) =>
+                            setTradeLineSettings((prev) => ({
+                              ...prev,
+                              lines: {
+                                ...prev?.lines,
+                                nextSell: { ...prev?.lines?.nextSell, color: e.target.value },
+                              },
+                            }))
+                          }
+                          style={{ width: '40px', height: '28px', cursor: 'pointer' }}
+                        />
+                      </div>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto' }}>
+                      <input
+                        type="checkbox"
+                        checked={tradeLineSettings?.lines?.nextSell?.visible ?? true}
+                        onChange={(e) =>
+                          setTradeLineSettings((prev) => ({
+                            ...prev,
+                            lines: {
+                              ...prev?.lines,
+                              nextSell: { ...prev?.lines?.nextSell, visible: e.target.checked },
+                            },
+                          }))
+                        }
+                      />
+                      <span style={{ fontSize: '12px' }}>Visible</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="button-group">
+              <button
+                className="secondary ghost"
+                type="button"
+                onClick={() => setIsTradeLineSettingsModalOpen(false)}
+              >
                 Close
               </button>
             </div>
