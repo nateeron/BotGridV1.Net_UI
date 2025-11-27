@@ -4000,6 +4000,14 @@ export default function App() {
           <button className="secondary ghost" onClick={() => fetchOrders('ordersManual')} disabled={ordersLoading}>
             {ordersLoading ? 'Loading...' : 'Refresh'}
           </button>
+          <button
+            className="primary"
+            onClick={openBuyNowForm}
+            disabled={buyNowLoading}
+            title="Create Order"
+          >
+            Create Order +
+          </button>
         </div>
       </header>
 
@@ -5099,18 +5107,6 @@ export default function App() {
             {viewMode === 'priceChart' && renderPriceChart()}
             {viewMode === 'calculate' && renderCalculate()}
             {viewMode === 'trade' && renderTrade()}
-            {viewMode === 'chart' && (
-              <div style={{ marginTop: '16px' }}>
-                <button
-                  className="primary"
-                  onClick={openBuyNowForm}
-                  disabled={buyNowLoading}
-                  title="Create Order"
-                >
-                  ➕
-                </button>
-              </div>
-            )}
           </>
         )}
         {activeTab === 'orders' && renderOrders()}
