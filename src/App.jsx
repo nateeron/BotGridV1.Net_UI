@@ -4791,6 +4791,23 @@ export default function App() {
                     const percentage = totalValue > 0 ? (value / totalValue) * 100 : 0
                     return (
                       <div key={index} className="chart-bar-item-vertical">
+                        {getCoinIcon(coin.coin) && (
+                          <img 
+                            src={getCoinIcon(coin.coin)} 
+                            alt={coin.coin}
+                            style={{ 
+                              width: '60px',
+                              height: '60px',
+                              borderRadius: '50%',
+                              objectFit: 'cover',
+                              marginBottom: '8px',
+                              border: '2px solid rgba(0, 209, 255, 0.3)',
+                              background: 'rgba(0, 0, 0, 0.3)',
+                              padding: '4px',
+                              flexShrink: 0
+                            }}
+                          />
+                        )}
                         <span className="chart-bar-percentage-vertical">{percentage.toFixed(1)}%</span>
                         <div className="chart-bar-container-vertical">
                           <div
@@ -4801,20 +4818,7 @@ export default function App() {
                           />
                         </div>
                         <div className="chart-bar-label-vertical">
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            {getCoinIcon(coin.coin) && (
-                              <img 
-                                src={getCoinIcon(coin.coin)} 
-                                alt={coin.coin}
-                                style={{ 
-                                  width: '24px', 
-                                  height: '24px',
-                                  objectFit: 'contain'
-                                }}
-                              />
-                            )}
-                            <span className="chart-coin-name">{coin.coin}</span>
-                          </div>
+                          <span className="chart-coin-name">{coin.coin}</span>
                           <span className="chart-coin-value">{value.toFixed(4)} USDT</span>
                         </div>
                       </div>
