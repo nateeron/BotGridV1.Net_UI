@@ -5036,11 +5036,11 @@ export default function App() {
       <div className="app-top-bar">
         <div className="top-bar-content">
           {/* Orders Info */}
-          <div className="top-bar-orders-info">
+          <div className="top-bar-orders-info" style={{ fontSize: '15px' }}>
             <div className="top-bar-item">
               <span className="top-bar-label">Orders:</span>
               <span className="top-bar-value">
-                All: {orderCounts.all} | SOLD: {orderCounts.sold} | WAITING: {orderCounts.waiting}
+                All: {orderCounts.all} | <span style={{ color: '#00ff00' }}>SOLD: {orderCounts.sold}</span> | <span style={{ color: '#ffa500' }}>WAITING: {orderCounts.waiting}</span>
               </span>
             </div>
             <div className="top-bar-item">
@@ -5056,6 +5056,22 @@ export default function App() {
                 {orderTotals.soldProfitLossTotal.toFixed(4)}
               </span>
             </div>
+            {spotReport?.portfolioValue !== undefined && (
+              <div className="top-bar-item">
+                <span className="top-bar-label">Portfolio Value:</span>
+                <span className="top-bar-value" style={{ color: '#ffa500' }}>
+                  {Number(spotReport.portfolioValue || 0).toFixed(4)}
+                </span>
+              </div>
+            )}
+            {spotReport?.portfolioValue !== undefined && selectedSetting?.buyAmountUSD && (
+              <div className="top-bar-item">
+                <span className="top-bar-label">จำนวนOrder:</span>
+                <span className="top-bar-value">
+                  {(Number(spotReport.portfolioValue || 0) / Number(selectedSetting.buyAmountUSD || 1)).toFixed(2)}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* BuyPause and Bot Controls */}
