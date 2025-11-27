@@ -385,6 +385,7 @@ export default function App() {
     chart: null,
     series: null,
     markersData: [], // Store markers data for re-application
+    nextEntryPriceLine: null, // Store NextEntry price line reference for real-time updates
   })
   const ordersRef = useRef([])
   const priceChartIntervalInitializedRef = useRef(false)
@@ -1865,6 +1866,105 @@ export default function App() {
     }
   }, [])
 
+  const calculateNextEntry = useCallback((orders) => {
+    if (!Array.isArray(orders) || orders.length === 0) return null
+
+    // Find last order (most recent)
+    const sortedOrders = [...orders].sort((a, b) => {
+      const timeA = parseTimestamp(a.dateBuy ?? a.createTime)
+      const timeB = parseTimestamp(b.dateBuy ?? b.createTime)
+      return (timeB || 0) - (timeA || 0)
+    })
+    const lastOrder = sortedOrders[0]
+    if (!lastOrder) return null
+
+    // Get PERCEN_BUY from settings
+    const orderSettingId = lastOrder.setting_ID ?? lastOrder.settingId ?? lastOrder.settingID
+    const relatedSetting = settings.find((s) => s.id === orderSettingId || s.id === String(orderSettingId))
+    const percenBuy = relatedSetting
+      ? Number(relatedSetting.perceN_BUY ?? relatedSetting.PERCEN_BUY ?? 0)
+      : Number(settings[0]?.perceN_BUY ?? settings[0]?.PERCEN_BUY ?? 0.4) || 0.4
+
+    const status = String(lastOrder.status || '').toUpperCase()
+    const buyPrice = Number(lastOrder.priceBuy ?? 0)
+    const sellPrice = Number(lastOrder.priceSellActual ?? 0)
+
+    if (status === 'WAITING_SELL') {
+      // nextEntry = BuyPrice - (BuyPrice * PERCEN_BUY / 100)
+      if (buyPrice > 0) {
+        return buyPrice - (buyPrice * percenBuy / 100)
+      }
+    } else if (status === 'SOLD') {
+      // nextEntry = SellPrice - (SellPrice * PERCEN_BUY / 100)
+      if (sellPrice > 0) {
+        return sellPrice - (sellPrice * percenBuy / 100)
+      }
+    }
+
+    return null
+  }, [settings])
+
+  // Function to update NextEntry line title with real-time percentage
+  const updateNextEntryLine = useCallback(() => {
+    const engine = priceChartEngineRef.current
+    const candleSeries = priceSeriesRef.current
+    if (!candleSeries || !engine.nextEntryPriceLine) return
+
+    const lineSettings = tradeLineSettings || {}
+    const lines = lineSettings.lines || {}
+    const buttons = lineSettings.buttons || {}
+    
+    // Check if NextEntry should be shown
+    if (!buttons.toggleNextEntry || !lines.nextEntry?.visible) return
+
+    // Get current orders to calculate nextEntryPrice
+    const currentOrders = ordersRef.current || []
+    const nextEntryPrice = currentOrders.length > 0 ? calculateNextEntry(currentOrders) : null
+    if (nextEntryPrice === null) return
+
+    // Get real-time last price from chart data
+    const chartData = engine.allData || []
+    const lastDataPoint = chartData.length > 0 ? chartData[chartData.length - 1] : null
+    if (!lastDataPoint) return
+
+    const realTimeLastPrice = Number(lastDataPoint.close ?? lastDataPoint.value ?? lastDataPoint.price ?? 0)
+    if (!realTimeLastPrice || !Number.isFinite(realTimeLastPrice) || realTimeLastPrice <= 0) return
+
+    // Calculate percentage: x% = (B - A) / A * 100
+    const percent = ((realTimeLastPrice - nextEntryPrice) / nextEntryPrice) * 100
+    const percentText = ` ${percent.toFixed(3)}%`
+    const baseText = `NextEntry ${nextEntryPrice.toFixed(4)}`
+    const fullText = baseText + percentText
+
+    // Update NextEntry line by removing old and creating new
+    try {
+      candleSeries.removePriceLine(engine.nextEntryPriceLine)
+      const lineConfig = lines.nextEntry
+      const lineType = lineConfig?.type || 'dot'
+      const lineColor = lineConfig?.color || '#0066FF'
+      
+      const newPriceLine = candleSeries.createPriceLine({
+        price: nextEntryPrice,
+        color: lineColor,
+        lineWidth: lineType === 'lineSolid' ? 2 : 1,
+        lineStyle: lineType === 'lineSolid' ? 0 : 1, // 0 = solid, 1 = dotted
+        axisLabelVisible: true,
+        title: fullText,
+      })
+      
+      // Replace in tradePriceLines array
+      const index = engine.tradePriceLines.indexOf(engine.nextEntryPriceLine)
+      if (index !== -1) {
+        engine.tradePriceLines[index] = newPriceLine
+      } else {
+        engine.tradePriceLines.push(newPriceLine)
+      }
+      engine.nextEntryPriceLine = newPriceLine
+    } catch (err) {
+      console.error('[NextEntry] Error updating line:', err)
+    }
+  }, [tradeLineSettings, calculateNextEntry])
+
   const updateSeriesPoint = useCallback((point) => {
     if (!priceSeriesRef.current || !point) return
     const engine = priceChartEngineRef.current
@@ -1884,7 +1984,9 @@ export default function App() {
         // ignore errors
       }
     }
-  }, [])
+    // Update NextEntry line with real-time percentage
+    updateNextEntryLine()
+  }, [updateNextEntryLine])
 
   const loadInitialCandles = useCallback(
     async (symbol, { silent = false } = {}) => {
@@ -2050,44 +2152,6 @@ export default function App() {
     viewMode,
   ])
 
-  const calculateNextEntry = useCallback((orders) => {
-    if (!Array.isArray(orders) || orders.length === 0) return null
-
-    // Find last order (most recent)
-    const sortedOrders = [...orders].sort((a, b) => {
-      const timeA = parseTimestamp(a.dateBuy ?? a.createTime)
-      const timeB = parseTimestamp(b.dateBuy ?? b.createTime)
-      return (timeB || 0) - (timeA || 0)
-    })
-    const lastOrder = sortedOrders[0]
-    if (!lastOrder) return null
-
-    // Get PERCEN_BUY from settings
-    const orderSettingId = lastOrder.setting_ID ?? lastOrder.settingId ?? lastOrder.settingID
-    const relatedSetting = settings.find((s) => s.id === orderSettingId || s.id === String(orderSettingId))
-    const percenBuy = relatedSetting
-      ? Number(relatedSetting.perceN_BUY ?? relatedSetting.PERCEN_BUY ?? 0)
-      : Number(settings[0]?.perceN_BUY ?? settings[0]?.PERCEN_BUY ?? 0.4) || 0.4
-
-    const status = String(lastOrder.status || '').toUpperCase()
-    const buyPrice = Number(lastOrder.priceBuy ?? 0)
-    const sellPrice = Number(lastOrder.priceSellActual ?? 0)
-
-    if (status === 'WAITING_SELL') {
-      // nextEntry = BuyPrice - (BuyPrice * PERCEN_BUY / 100)
-      if (buyPrice > 0) {
-        return buyPrice - (buyPrice * percenBuy / 100)
-      }
-    } else if (status === 'SOLD') {
-      // nextEntry = SellPrice - (SellPrice * PERCEN_BUY / 100)
-      if (sellPrice > 0) {
-        return sellPrice - (sellPrice * percenBuy / 100)
-      }
-    }
-
-    return null
-  }, [settings])
-
   const resetPriceChartDecorations = useCallback(() => {
     const engine = priceChartEngineRef.current
     const candleSeries = priceSeriesRef.current
@@ -2133,6 +2197,16 @@ export default function App() {
       }
     }
     engine.markersData = []
+
+    // Clear NextEntry price line
+    if (candleSeries && engine.nextEntryPriceLine) {
+      try {
+        candleSeries.removePriceLine(engine.nextEntryPriceLine)
+      } catch {
+        // ignore
+      }
+    }
+    engine.nextEntryPriceLine = null
   }, [])
 
   const applyTradeDecorations = useCallback((orders) => {
@@ -2365,6 +2439,12 @@ export default function App() {
 
     // Plot WaitSell lines
     if (buttons.toggleWaitSell && lines.waitSell?.visible) {
+      // Calculate min price (A) from all waitSellOrders
+      const allWaitSellPrices = waitSellOrders
+        .map((o) => Number(o.priceWaitSell ?? 0))
+        .filter((p) => p > 0)
+      const minPrice = allWaitSellPrices.length > 0 ? Math.min(...allWaitSellPrices) : null
+
       waitSellOrders.forEach((order) => {
         const waitSellPrice = Number(order.priceWaitSell ?? 0)
         const buyTime = normalizeTimeSec(order.dateBuy ?? order.createTime)
@@ -2375,13 +2455,38 @@ export default function App() {
           const orderId = order?.id || order?.orderBuyID || ''
           const orderIdText = orderId ? `#${orderId} ` : ''
 
+          // Calculate percentage: x% = (B - A) / A * 100
+          // A = min price, B = next high price (if exists)
+          let percentText = ''
+          if (minPrice !== null && minPrice > 0) {
+            console.log("minPrice",minPrice)
+            console.log("waitSellPrice",waitSellPrice)
+            // Find next high price (B) - price higher than current waitSellPrice
+            const nextHighPrices = allWaitSellPrices.filter((p) => p > waitSellPrice)
+            console.log("nextHighPrices",nextHighPrices)
+            const nextHighPrice = nextHighPrices.length > 0 ? Math.min(...nextHighPrices) : null
+            console.log("nextHighPrices",nextHighPrice)
+
+            if (nextHighPrice !== null && nextHighPrice > 0) {
+              // x% = (B - A) / A * 100
+              const percent = ((nextHighPrice - minPrice) / minPrice) * 100
+              percentText = ` ${percent.toFixed(3)}%`
+            } else {
+              // No next price, set x% = 0
+              percentText = ' 0.000%'
+            }
+          }
+
+          const baseText = `${orderIdText}WaitSell ${waitSellPrice.toFixed(4)}`
+          const fullText = baseText + percentText
+
           if (lineType === 'markers') {
             markers.push({
               time: buyTime,
               position: 'aboveBar',
               color: lineColor,
               shape: 'circle',
-              text: `${orderIdText}WaitSell ${waitSellPrice.toFixed(4)}`,
+              text: fullText,
             })
           } else if (lineType === 'lineSolid') {
             // เส้นทึบแนวนอนเต็ม
@@ -2391,7 +2496,7 @@ export default function App() {
               lineWidth: 2,
               lineStyle: 0, // solid
               axisLabelVisible: true,
-              title: `${orderIdText}WaitSell ${waitSellPrice.toFixed(4)}`,
+              title: fullText,
             })
             engine.tradePriceLines.push(priceLine)
           } else if (lineType === 'dot') {
@@ -2402,7 +2507,7 @@ export default function App() {
               lineWidth: 1,
               lineStyle: 1, // dotted
               axisLabelVisible: true,
-              title: `${orderIdText}WaitSell ${waitSellPrice.toFixed(4)}`,
+              title: fullText,
             })
             engine.tradePriceLines.push(priceLine)
           } else if (lineType === 'lineSeries') {
@@ -2431,36 +2536,70 @@ export default function App() {
       const currentTime = Math.floor(Date.now() / 1000)
       const timeSpan = 60 * 60 * 24 // 24 hours
 
+      // Calculate percentage: x% = (B - A) / A * 100
+      // A = nextEntryPrice, B = RealTime last price (last close price from chart data)
+      let percentText = ''
+      const lastDataPoint = chartData.length > 0 ? chartData[chartData.length - 1] : null
+      if (lastDataPoint) {
+        const realTimeLastPrice = Number(lastDataPoint.close ?? lastDataPoint.value ?? lastDataPoint.price ?? 0)
+        if (realTimeLastPrice > 0 && Number.isFinite(realTimeLastPrice) && nextEntryPrice > 0) {
+          // x% = (B - A) / A * 100
+          const percent = ((realTimeLastPrice - nextEntryPrice) / nextEntryPrice) * 100
+          percentText = ` ${percent.toFixed(3)}%`
+        }
+      }
+
+      const baseText = `NextEntry ${nextEntryPrice.toFixed(4)}`
+      const fullText = baseText + percentText
+
       if (lineType === 'markers') {
         markers.push({
           time: currentTime,
           position: 'belowBar',
           color: lineColor,
           shape: 'circle',
-          text: `NextEntry ${nextEntryPrice.toFixed(4)}`,
+          text: fullText,
         })
       } else if (lineType === 'lineSolid') {
         // เส้นทึบแนวนอนเต็ม
+        // Remove old NextEntry line if exists
+        if (engine.nextEntryPriceLine) {
+          try {
+            candleSeries.removePriceLine(engine.nextEntryPriceLine)
+          } catch {
+            // ignore
+          }
+        }
         const priceLine = candleSeries.createPriceLine({
           price: nextEntryPrice,
           color: lineColor,
           lineWidth: 2,
           lineStyle: 0, // solid
           axisLabelVisible: true,
-          title: `NextEntry ${nextEntryPrice.toFixed(4)}`,
+          title: fullText,
         })
         engine.tradePriceLines.push(priceLine)
+        engine.nextEntryPriceLine = priceLine // Store reference for real-time updates
       } else if (lineType === 'dot') {
         // เส้นจุดแนวนอนเต็ม
+        // Remove old NextEntry line if exists
+        if (engine.nextEntryPriceLine) {
+          try {
+            candleSeries.removePriceLine(engine.nextEntryPriceLine)
+          } catch {
+            // ignore
+          }
+        }
         const priceLine = candleSeries.createPriceLine({
           price: nextEntryPrice,
           color: lineColor,
           lineWidth: 1,
           lineStyle: 1, // dotted
           axisLabelVisible: true,
-          title: `NextEntry ${nextEntryPrice.toFixed(4)}`,
+          title: fullText,
         })
         engine.tradePriceLines.push(priceLine)
+        engine.nextEntryPriceLine = priceLine // Store reference for real-time updates
       } else if (lineType === 'lineSeries') {
         const lineSeries = chart.addLineSeries({
           color: lineColor,
@@ -2982,6 +3121,13 @@ export default function App() {
     applyTradeDecorations(orders)
     plotHorizontalLines(buildHorizontalLinesFromOrders(orders))
   }, [applyTradeDecorations, orders, plotHorizontalLines, viewMode, tradeLineSettings])
+
+  // Update NextEntry line percentage when price changes
+  useEffect(() => {
+    if (viewMode !== 'priceChart') return
+    if (!priceSeriesRef.current || !priceChartInstanceRef.current) return
+    updateNextEntryLine()
+  }, [priceChartData, updateNextEntryLine, viewMode])
 
   const handlePriceChartIntervalChange = (value) => {
     if (!value || value === priceChartInterval) return
