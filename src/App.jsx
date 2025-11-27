@@ -2271,7 +2271,7 @@ export default function App() {
   )
 
   useEffect(() => {
-    if (viewMode !== 'priceChart') return
+    if (viewMode !== 'priceChart' || activeTab !== 'orders') return
     if (!resolvedChartSymbol) return
     if (!priceChartIntervalInitializedRef.current) {
       priceChartIntervalInitializedRef.current = true
@@ -2284,6 +2284,7 @@ export default function App() {
     }
     reload()
   }, [
+    activeTab,
     priceChartInterval,
     loadInitialCandles,
     resolvedChartSymbol,
@@ -2976,15 +2977,15 @@ export default function App() {
   }, [])
 
   const fetchPriceData = useCallback(async () => {
-    if (viewMode !== 'priceChart') return
+    if (viewMode !== 'priceChart' || activeTab !== 'orders') return
     if (!resolvedChartSymbol) return
     stopRealtimeFeed()
     await loadInitialCandles(resolvedChartSymbol)
     startRealtimeFeed(resolvedChartSymbol)
-  }, [loadInitialCandles, resolvedChartSymbol, startRealtimeFeed, stopRealtimeFeed, viewMode])
+  }, [activeTab, loadInitialCandles, resolvedChartSymbol, startRealtimeFeed, stopRealtimeFeed, viewMode])
 
   useEffect(() => {
-    if (viewMode !== 'priceChart') {
+    if (viewMode !== 'priceChart' || activeTab !== 'orders') {
       stopRealtimeFeed()
       return
     }
@@ -3256,6 +3257,7 @@ export default function App() {
       resetPriceChartDecorations()
     }
   }, [
+    activeTab,
     applyTradeDecorations,
     getPriceScalePrecision,
     loadInitialCandles,
@@ -3269,15 +3271,15 @@ export default function App() {
   ])
 
   useEffect(() => {
-    if (viewMode !== 'priceChart') return
+    if (viewMode !== 'priceChart' || activeTab !== 'orders') return
     if (!priceSeriesRef.current || !priceChartInstanceRef.current) return
     applyTradeDecorations(orders)
     plotHorizontalLines(buildHorizontalLinesFromOrders(orders))
-  }, [applyTradeDecorations, orders, plotHorizontalLines, viewMode, tradeLineSettings])
+  }, [activeTab, applyTradeDecorations, orders, plotHorizontalLines, viewMode, tradeLineSettings])
 
   // Update price scale precision when symbol changes
   useEffect(() => {
-    if (viewMode !== 'priceChart') return
+    if (viewMode !== 'priceChart' || activeTab !== 'orders') return
     const series = priceSeriesRef.current
     if (!series || typeof series.priceScale !== 'function') return
     
@@ -3289,14 +3291,14 @@ export default function App() {
     } catch (err) {
       console.warn('Failed to update price scale precision:', err)
     }
-  }, [resolvedChartSymbol, viewMode, getPriceScalePrecision])
+  }, [activeTab, resolvedChartSymbol, viewMode, getPriceScalePrecision])
 
   // Update NextEntry line percentage when price changes
   useEffect(() => {
-    if (viewMode !== 'priceChart') return
+    if (viewMode !== 'priceChart' || activeTab !== 'orders') return
     if (!priceSeriesRef.current || !priceChartInstanceRef.current) return
     updateNextEntryLine()
-  }, [priceChartData, updateNextEntryLine, viewMode])
+  }, [activeTab, priceChartData, updateNextEntryLine, viewMode])
 
   const handlePriceChartIntervalChange = (value) => {
     if (!value || value === priceChartInterval) return
