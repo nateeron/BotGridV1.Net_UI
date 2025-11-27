@@ -4,6 +4,7 @@ import iconBTC from './icon/XTVCBTC--big.svg'
 import iconSOL from './icon/XTVCSOL--big.svg'
 import iconUSDT from './icon/XTVCUSDT--big.svg'
 import iconXRP from './icon/XTVCXRP--big.svg'
+import alertSound from './sound/sound-Buy-Sell.mp3'
 
 const tabs = [
   { key: 'orders', label: 'Orders', icon: '📦' },
@@ -505,6 +506,7 @@ export default function App() {
   const [alertLogsLoading, setAlertLogsLoading] = useState(false)
   const [alertLogsError, setAlertLogsError] = useState(null)
   const [unreadCount, setUnreadCount] = useState(0)
+  const alertSoundRef = useRef(null)
   const [alertFilters, setAlertFilters] = useState({
     Limit: null,
     Offset: 0,
@@ -1178,6 +1180,21 @@ export default function App() {
     }
   }, [apiBase])
 
+  // Play alert sound
+  const playAlertSound = useCallback(() => {
+    try {
+      if (alertSoundRef.current) {
+        alertSoundRef.current.currentTime = 0 // Reset to start
+        alertSoundRef.current.play().catch((err) => {
+          console.warn('Could not play alert sound:', err)
+          // User interaction may be required for autoplay
+        })
+      }
+    } catch (err) {
+      console.warn('Error playing alert sound:', err)
+    }
+  }, [])
+
   // SignalR connection for alerts
   useEffect(() => {
     let alertConnection = null
@@ -1208,6 +1225,9 @@ export default function App() {
             timestamp: new Date(),
           }
           setAlerts((prev) => [newAlert, ...prev].slice(0, 10)) // Keep last 10 alerts
+
+          // Play alert sound
+          playAlertSound()
 
           // Check if this is an Order Buy or Sell alert
           const alertTitle = (alert.title || '').toLowerCase()
@@ -1279,7 +1299,7 @@ export default function App() {
         })
       }
     }
-  }, [apiBase, fetchOrders, fetchUnreadCount])
+  }, [apiBase, playAlertSound, fetchOrders, fetchUnreadCount])
 
   const formatDateTime = (value) => {
     if (!value) return '-'
@@ -5127,6 +5147,9 @@ export default function App() {
 
   return (
     <div className="app">
+      {/* Hidden audio element for alert sound */}
+      <audio ref={alertSoundRef} src={alertSound} preload="auto" />
+      
       {/* Alert Notifications */}
       <div className="alert-notifications">
         {alerts.length > 0 && (
@@ -5320,6 +5343,13 @@ export default function App() {
           🔔
           {unreadCount > 0 && <span className="unread-badge">{unreadCount}</span>}
         </button>
+        <button 
+          className="top-control-btn" 
+          onClick={playAlertSound} 
+          title="Test Alert Sound"
+        >
+          🔊
+        </button>
         <button className="top-control-btn" onClick={clearLogs} title="Clear All Logs">
           🗑
         </button>
@@ -5328,7 +5358,7 @@ export default function App() {
           onClick={handleLogout} 
           title="Logout"
           style={{ color: '#24A4D6FF',fontSize: '9px' }}
-
+ 
         >
           Logout
         </button>
