@@ -2469,13 +2469,14 @@ export default function App() {
       const allWaitSellPrices = waitSellOrders
         .map((o) => Number(o.priceWaitSell ?? 0))
         .filter((p) => p > 0)
-      const minPrice = allWaitSellPrices.length > 0 ? Math.min(...allWaitSellPrices) : null
-
+      //const minPrice = allWaitSellPrices.length > 0 ? Math.min(...allWaitSellPrices) : null
+      console.log("*%%%%%**",waitSellOrders)
       waitSellOrders.forEach((order , index) => {
-        console.log("*****************************",waitSellOrders[index].priceWaitSell)
+        const _minPrice = order.priceWaitSell
+        console.log("*****************************",_minPrice)
         const waitSellPrice = Number(order.priceWaitSell ?? 0)
         const buyTime = normalizeTimeSec(order.dateBuy ?? order.createTime)
-        if (waitSellPrice > 0 && buyTime) {
+        if (_minPrice > 0 && buyTime) {
           const lineConfig = lines.waitSell
           const lineType = lineConfig?.type || 'dot'
           const lineColor = lineConfig?.color || '#FFA500'
@@ -2485,25 +2486,21 @@ export default function App() {
           // Calculate percentage: x% = (B - A) / A * 100
           // A = min price, B = next high price (if exists)
           let percentText = ''
-          if (minPrice !== null && minPrice > 0) {
-            console.log("minPrice",minPrice)
-            console.log("waitSellPrice",waitSellPrice)
+          if (_minPrice !== null && _minPrice > 0) {
             // Find next high price (B) - price higher than current waitSellPrice
-            const nextHighPrices = allWaitSellPrices.filter((p) => p > waitSellPrice)
-            console.log("nextHighPrices",nextHighPrices)
-            const nextHighPrice = nextHighPrices.length > 0 ? Math.min(...nextHighPrices) : null
-            console.log("nextHighPrices",nextHighPrice)
-
+            //const nextHighPrices = allWaitSellPrices.filter((p) => p > waitSellPrice)
+            //const nextHighPrice = nextHighPrices.length > 0 ? Math.min(...nextHighPrices) : null
+            const nextHighPrice = waitSellOrders[index + 1]?.priceWaitSell ?? 0
             if (nextHighPrice !== null && nextHighPrice > 0) {
               // x% = (B - A) / A * 100
-              const percent = ((nextHighPrice - minPrice) / minPrice) * 100
+              console.log(nextHighPrice,"-",_minPrice,"/",_minPrice,"* 100 =",((nextHighPrice - _minPrice) / _minPrice) * 100)
+              const percent = ((nextHighPrice - _minPrice) / _minPrice) * 100
               percentText = ` ${percent.toFixed(3)}%`
             } else {
               // No next price, set x% = 0
               percentText = ' 0.000%'
             }
           }
-          console.log("percentText",percentText)
           const baseText = `${orderIdText}WaitSell ${waitSellPrice.toFixed(4)}`
           const fullText = baseText + percentText
 
