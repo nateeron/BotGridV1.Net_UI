@@ -500,6 +500,8 @@ export default function App() {
           type: 'markers',
           colorBuy: '#0066FF', // ฟ้า
           colorSell: '#FF55AA', // ชมพู
+          limit: 10, // Limit number of buy/sell plots to show
+          timeOffset: 7, // Time offset in hours (+7 hours)
         },
         waitSell: {
           visible: true,
@@ -2266,14 +2268,32 @@ export default function App() {
 
     // Plot Buy-Sell markers/lines
     if (buttons.toggleBuy && lines['buy-Sell']?.visible && hasOrders) {
-      orders.forEach((order) => {
+      const lineConfig = lines['buy-Sell'] || {}
+      const limit = lineConfig.limit ?? 10
+      const timeOffsetHours = lineConfig.timeOffset ?? 7
+      const timeOffsetSeconds = timeOffsetHours * 60 * 60 // Convert hours to seconds
+      
+      // Sort orders by most recent first (by buy time or create time)
+      const sortedOrders = [...orders].sort((a, b) => {
+        const timeA = normalizeTimeSec(a.dateBuy ?? a.createTime) || 0
+        const timeB = normalizeTimeSec(b.dateBuy ?? b.createTime) || 0
+        return timeB - timeA // Most recent first
+      })
+      
+      // Take only the last N orders
+      const limitedOrders = sortedOrders.slice(0, limit)
+      
+      limitedOrders.forEach((order) => {
         const buyPrice = Number(order.priceBuy ?? 0)
         const sellPrice = Number(order.priceSellActual ?? 0)
-        const buyTime = normalizeTimeSec(order.dateBuy ?? order.createTime)
-        const sellTime = normalizeTimeSec(order.dateSell ?? order.updateTime)
+        let buyTime = normalizeTimeSec(order.dateBuy ?? order.createTime)
+        let sellTime = normalizeTimeSec(order.dateSell ?? order.updateTime)
+        
+        // Apply time offset
+        if (buyTime) buyTime = buyTime + timeOffsetSeconds
+        if (sellTime) sellTime = sellTime + timeOffsetSeconds
 
         if (buyPrice > 0 && buyTime) {
-          const lineConfig = lines['buy-Sell']
           const lineType = lineConfig?.type || 'markers'
           const buyColor = lineConfig?.colorBuy || '#0066FF' // ฟ้า
           const orderId = order?.id || order?.orderBuyID || ''
@@ -2358,7 +2378,6 @@ export default function App() {
         }
 
         if (sellPrice > 0 && sellTime) {
-          const lineConfig = lines['buy-Sell']
           const lineType = lineConfig?.type || 'markers'
           const sellColor = lineConfig?.colorSell || '#FF55AA' // ชมพู
           const orderId = order?.id || order?.orderBuyID || ''
@@ -2452,7 +2471,8 @@ export default function App() {
         .filter((p) => p > 0)
       const minPrice = allWaitSellPrices.length > 0 ? Math.min(...allWaitSellPrices) : null
 
-      waitSellOrders.forEach((order) => {
+      waitSellOrders.forEach((order , index) => {
+        console.log("*****************************",waitSellOrders[index].priceWaitSell)
         const waitSellPrice = Number(order.priceWaitSell ?? 0)
         const buyTime = normalizeTimeSec(order.dateBuy ?? order.createTime)
         if (waitSellPrice > 0 && buyTime) {
@@ -2483,7 +2503,7 @@ export default function App() {
               percentText = ' 0.000%'
             }
           }
-
+          console.log("percentText",percentText)
           const baseText = `${orderIdText}WaitSell ${waitSellPrice.toFixed(4)}`
           const fullText = baseText + percentText
 
@@ -5692,6 +5712,41 @@ export default function App() {
                           style={{ width: '40px', height: '28px', cursor: 'pointer' }}
                         />
                       </div>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                      <span style={{ fontSize: '11px', opacity: 0.7 }}>Limit (Last N)</span>
+                      <input
+                        type="number"
+                        min="1"
+                        value={tradeLineSettings?.lines?.['buy-Sell']?.limit ?? 10}
+                        onChange={(e) =>
+                          setTradeLineSettings((prev) => ({
+                            ...prev,
+                            lines: {
+                              ...prev?.lines,
+                              'buy-Sell': { ...prev?.lines?.['buy-Sell'], limit: parseInt(e.target.value) || 10 },
+                            },
+                          }))
+                        }
+                        style={{ padding: '4px 8px', fontSize: '12px', width: '80px' }}
+                      />
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                      <span style={{ fontSize: '11px', opacity: 0.7 }}>Time Offset (Hours)</span>
+                      <input
+                        type="number"
+                        value={tradeLineSettings?.lines?.['buy-Sell']?.timeOffset ?? 7}
+                        onChange={(e) =>
+                          setTradeLineSettings((prev) => ({
+                            ...prev,
+                            lines: {
+                              ...prev?.lines,
+                              'buy-Sell': { ...prev?.lines?.['buy-Sell'], timeOffset: parseFloat(e.target.value) || 7 },
+                            },
+                          }))
+                        }
+                        style={{ padding: '4px 8px', fontSize: '12px', width: '80px' }}
+                      />
                     </label>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto' }}>
                       <input
