@@ -5772,13 +5772,13 @@ export default function App() {
                       <input
                         type="number"
                         min="1"
-                        value={tradeLineSettings?.lines?.['buy-Sell']?.limit ?? 2}
+                        value={tradeLineSettings?.lines?.['buy-Sell']?.limit ?? 3}
                         onChange={(e) =>
                           setTradeLineSettings((prev) => ({
                             ...prev,
                             lines: {
                               ...prev?.lines,
-                              'buy-Sell': { ...prev?.lines?.['buy-Sell'], limit: parseInt(e.target.value) || 2 },
+                              'buy-Sell': { ...prev?.lines?.['buy-Sell'], limit: parseInt(e.target.value) || 3 },
                             },
                           }))
                         }
