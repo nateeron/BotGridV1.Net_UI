@@ -1,5 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as signalR from '@microsoft/signalr'
+import iconBTC from './icon/XTVCBTC--big.svg'
+import iconSOL from './icon/XTVCSOL--big.svg'
+import iconUSDT from './icon/XTVCUSDT--big.svg'
+import iconXRP from './icon/XTVCXRP--big.svg'
 
 const tabs = [
   { key: 'orders', label: 'Orders', icon: '📦' },
@@ -1836,6 +1840,18 @@ export default function App() {
     []
   )
 
+  // Price scale precision configuration per symbol
+  const getPriceScalePrecision = useCallback((symbol) => {
+    const symbolUpper = (symbol || '').toUpperCase()
+    const priceScaleMap = {
+      'XRPUSDT': 4,
+      'SOLUSDT': 2,
+      'BNBUSDT': 2,
+      'BTCUSDT': 2,
+    }
+    return priceScaleMap[symbolUpper] ?? 4 // Default to 4 decimals
+  }, [])
+
   const resolvedChartSymbol = useMemo(() => {
     if (customChartSymbol) {
       return customChartSymbol.toUpperCase()
@@ -1852,6 +1868,23 @@ export default function App() {
 
   // Get symbol from orders or settings
   const getChartSymbol = () => resolvedChartSymbol
+
+  // Get icon path for coin symbol
+  const getCoinIcon = useCallback((coinSymbol) => {
+    if (!coinSymbol) return null
+    const symbolUpper = coinSymbol.toUpperCase()
+    // Handle both full symbols (e.g., BTCUSDT) and base symbols (e.g., BTC)
+    const baseSymbol = symbolUpper.replace(/USDT$/, '').replace(/USDC$/, '').replace(/USD$/, '')
+    
+    const iconMap = {
+      'BTC': iconBTC,
+      'SOL': iconSOL,
+      'USDT': iconUSDT,
+      'XRP': iconXRP,
+    }
+    
+    return iconMap[baseSymbol] || iconMap[symbolUpper] || null
+  }, [])
 
   const applySeriesData = useCallback((data) => {
     if (!priceSeriesRef.current || !Array.isArray(data)) return
@@ -2470,10 +2503,9 @@ export default function App() {
         .map((o) => Number(o.priceWaitSell ?? 0))
         .filter((p) => p > 0)
       //const minPrice = allWaitSellPrices.length > 0 ? Math.min(...allWaitSellPrices) : null
-      console.log("*%%%%%**",waitSellOrders)
-      waitSellOrders.forEach((order , index) => {
+      const waitSellOrders_Sorted = waitSellOrders.sort((a, b) => a.priceWaitSell - b.priceWaitSell)
+      waitSellOrders_Sorted.forEach((order , index) => {
         const _minPrice = order.priceWaitSell
-        console.log("*****************************",_minPrice)
         const waitSellPrice = Number(order.priceWaitSell ?? 0)
         const buyTime = normalizeTimeSec(order.dateBuy ?? order.createTime)
         if (_minPrice > 0 && buyTime) {
@@ -2493,7 +2525,6 @@ export default function App() {
             const nextHighPrice = waitSellOrders[index + 1]?.priceWaitSell ?? 0
             if (nextHighPrice !== null && nextHighPrice > 0) {
               // x% = (B - A) / A * 100
-              console.log(nextHighPrice,"-",_minPrice,"/",_minPrice,"* 100 =",((nextHighPrice - _minPrice) / _minPrice) * 100)
               const percent = ((nextHighPrice - _minPrice) / _minPrice) * 100
               percentText = ` ${percent.toFixed(3)}%`
             } else {
@@ -2745,27 +2776,14 @@ export default function App() {
         }
       }
 
-      console.log('[Last Action] Debug:', {
-        toggleLastAction: buttons.toggleLastAction,
-        visible: lines.lastAction?.visible,
-        hasOrders,
-        ordersCount: hasOrders ? orders.length : 0,
-        lastActionPrice,
-        priceSource,
-        chartDataLength: chartData.length,
-      })
+     
 
       if (lastActionPrice !== null && Number.isFinite(lastActionPrice) && lastActionPrice > 0) {
         const lineConfig = lines.lastAction
         const lineType = lineConfig?.type || 'dot'
         const lineColor = lineConfig?.color || '#808080' // สีเทา
 
-        console.log('[Last Action] Creating line:', {
-          price: lastActionPrice,
-          type: lineType,
-          color: lineColor,
-        })
-
+      
         try {
           if (lineType === 'dot') {
             // เส้นจุดแนวนอนเต็ม (gray dotted line)
@@ -2778,7 +2796,6 @@ export default function App() {
               title: `Last Action ${lastActionPrice.toFixed(4)}`,
             })
             engine.tradePriceLines.push(priceLine)
-            console.log('[Last Action] Price line created and pushed:', priceLine)
           } else if (lineType === 'lineSolid') {
             // เส้นทึบแนวนอนเต็ม
             const priceLine = candleSeries.createPriceLine({
@@ -2790,7 +2807,6 @@ export default function App() {
               title: `Last Action ${lastActionPrice.toFixed(4)}`,
             })
             engine.tradePriceLines.push(priceLine)
-            console.log('[Last Action] Price line created and pushed:', priceLine)
           } else if (lineType === 'lineSeries') {
             const currentTime = Math.floor(Date.now() / 1000)
             const timeSpan = 60 * 60 * 24 // 24 hours
@@ -2805,7 +2821,6 @@ export default function App() {
               { time: currentTime + timeSpan, value: lastActionPrice },
             ])
             engine.tradeOverlays.push(lineSeries)
-            console.log('[Last Action] Line series created and pushed:', lineSeries)
           } else if (lineType === 'markers') {
             const currentTime = Math.floor(Date.now() / 1000)
             markers.push({
@@ -3069,6 +3084,18 @@ export default function App() {
         engine.allData = []
         engine.earliestTimeMs = null
 
+        // Apply price scale precision based on symbol
+        if (primarySeries && typeof primarySeries.priceScale === 'function') {
+          const precision = getPriceScalePrecision(resolvedChartSymbol)
+          try {
+            primarySeries.priceScale().applyOptions({
+              precision: precision,
+            })
+          } catch (err) {
+            console.warn('Failed to apply price scale precision:', err)
+          }
+        }
+
         await loadInitialCandles(resolvedChartSymbol)
         applyTradeDecorations(ordersRef.current)
         plotHorizontalLines(buildHorizontalLinesFromOrders(ordersRef.current))
@@ -3132,6 +3159,7 @@ export default function App() {
     }
   }, [
     applyTradeDecorations,
+    getPriceScalePrecision,
     loadInitialCandles,
     loadMoreCandles,
     plotHorizontalLines,
@@ -3148,6 +3176,22 @@ export default function App() {
     applyTradeDecorations(orders)
     plotHorizontalLines(buildHorizontalLinesFromOrders(orders))
   }, [applyTradeDecorations, orders, plotHorizontalLines, viewMode, tradeLineSettings])
+
+  // Update price scale precision when symbol changes
+  useEffect(() => {
+    if (viewMode !== 'priceChart') return
+    const series = priceSeriesRef.current
+    if (!series || typeof series.priceScale !== 'function') return
+    
+    const precision = getPriceScalePrecision(resolvedChartSymbol)
+    try {
+      series.priceScale().applyOptions({
+        precision: precision,
+      })
+    } catch (err) {
+      console.warn('Failed to update price scale precision:', err)
+    }
+  }, [resolvedChartSymbol, viewMode, getPriceScalePrecision])
 
   // Update NextEntry line percentage when price changes
   useEffect(() => {
@@ -4757,7 +4801,20 @@ export default function App() {
                           />
                         </div>
                         <div className="chart-bar-label-vertical">
-                          <span className="chart-coin-name">{coin.coin}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            {getCoinIcon(coin.coin) && (
+                              <img 
+                                src={getCoinIcon(coin.coin)} 
+                                alt={coin.coin}
+                                style={{ 
+                                  width: '24px', 
+                                  height: '24px',
+                                  objectFit: 'contain'
+                                }}
+                              />
+                            )}
+                            <span className="chart-coin-name">{coin.coin}</span>
+                          </div>
                           <span className="chart-coin-value">{value.toFixed(4)} USDT</span>
                         </div>
                       </div>
@@ -5715,13 +5772,13 @@ export default function App() {
                       <input
                         type="number"
                         min="1"
-                        value={tradeLineSettings?.lines?.['buy-Sell']?.limit ?? 10}
+                        value={tradeLineSettings?.lines?.['buy-Sell']?.limit ?? 2}
                         onChange={(e) =>
                           setTradeLineSettings((prev) => ({
                             ...prev,
                             lines: {
                               ...prev?.lines,
-                              'buy-Sell': { ...prev?.lines?.['buy-Sell'], limit: parseInt(e.target.value) || 10 },
+                              'buy-Sell': { ...prev?.lines?.['buy-Sell'], limit: parseInt(e.target.value) || 2 },
                             },
                           }))
                         }
@@ -5732,13 +5789,13 @@ export default function App() {
                       <span style={{ fontSize: '11px', opacity: 0.7 }}>Time Offset (Hours)</span>
                       <input
                         type="number"
-                        value={tradeLineSettings?.lines?.['buy-Sell']?.timeOffset ?? 7}
+                        value={tradeLineSettings?.lines?.['buy-Sell']?.timeOffset ?? 14}
                         onChange={(e) =>
                           setTradeLineSettings((prev) => ({
                             ...prev,
                             lines: {
                               ...prev?.lines,
-                              'buy-Sell': { ...prev?.lines?.['buy-Sell'], timeOffset: parseFloat(e.target.value) || 7 },
+                              'buy-Sell': { ...prev?.lines?.['buy-Sell'], timeOffset: parseFloat(e.target.value) || 14 },
                             },
                           }))
                         }
