@@ -5853,7 +5853,20 @@ export default function App() {
       {/* Trade Line Settings Modal */}
       {isTradeLineSettingsModalOpen && (
         <div className="modal-backdrop" onClick={() => setIsTradeLineSettingsModalOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
+          <div 
+            className="modal" 
+            onClick={(e) => e.stopPropagation()} 
+            style={{ 
+              maxWidth: '600px', 
+              maxHeight: '90vh', 
+              overflowY: 'auto',
+              background: 'rgb(13 21 36 / 0%)',
+              backdropFilter: 'blur(5px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              border: '1px solid rgba(99, 160, 255, 0.2)',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)'
+            }}
+          >
             <header>
               <h3>Trade Line Settings</h3>
             </header>
