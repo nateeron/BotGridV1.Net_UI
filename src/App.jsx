@@ -486,6 +486,7 @@ export default function App() {
         toggleBuy: false,
         toggleNextEntry: true,
         toggleNextSell: true,
+        toggleLastAction: true,
       },
       styleOptions: ['lineSeries', 'lineSolid', 'dot', 'markers'],
       lines: {
@@ -514,6 +515,11 @@ export default function App() {
           type: 'dot',
           color: '#FF55AA',
           formula: 'WaitSellPrice',
+        },
+        lastAction: {
+          visible: true,
+          type: 'dot',
+          color: '#808080', // สีเทา
         },
       },
     })
@@ -2138,7 +2144,9 @@ export default function App() {
     const lineSettings = tradeLineSettings || {}
     const lines = lineSettings.lines || {}
     const buttons = lineSettings.buttons || {}
-    const chartData = priceChartData || engine.allData || []
+    // Use engine.allData instead of priceChartData to avoid dependency issues
+    // engine.allData is updated with latest chart data
+    const chartData = engine.allData || []
 
     // Clear all existing price lines
     if (engine.tradePriceLines.length) {
@@ -2170,14 +2178,13 @@ export default function App() {
     // Check if all lines are toggled off
     if (!buttons.toggleAllLines) return
 
-    if (!Array.isArray(orders) || orders.length === 0) return
-
     const markers = []
-    const waitSellOrders = orders.filter((o) => String(o?.status || '').toUpperCase() === 'WAITING_SELL')
-    const nextEntryPrice = calculateNextEntry(orders)
+    const hasOrders = Array.isArray(orders) && orders.length > 0
+    const waitSellOrders = hasOrders ? orders.filter((o) => String(o?.status || '').toUpperCase() === 'WAITING_SELL') : []
+    const nextEntryPrice = hasOrders ? calculateNextEntry(orders) : null
 
     // Plot Buy-Sell markers/lines
-    if (buttons.toggleBuy && lines['buy-Sell']?.visible) {
+    if (buttons.toggleBuy && lines['buy-Sell']?.visible && hasOrders) {
       orders.forEach((order) => {
         const buyPrice = Number(order.priceBuy ?? 0)
         const sellPrice = Number(order.priceSellActual ?? 0)
@@ -2533,6 +2540,133 @@ export default function App() {
             engine.tradeOverlays.push(lineSeries)
           }
         }
+      }
+    }
+
+    // Plot Last Action line (gray dotted line showing last price from latest order)
+    // Check both toggleLastAction and visible (default to true if not set)
+    const shouldShowLastAction = (buttons.toggleLastAction !== false) && (lines.lastAction?.visible !== false)
+    if (shouldShowLastAction) {
+      let lastActionPrice = null
+      let priceSource = 'none'
+      
+      // Find last order (most recent) - same logic as calculateNextEntry
+      if (hasOrders && Array.isArray(orders) && orders.length > 0) {
+        const sortedOrders = [...orders].sort((a, b) => {
+          const timeA = parseTimestamp(a.dateBuy ?? a.createTime)
+          const timeB = parseTimestamp(b.dateBuy ?? b.createTime)
+          return (timeB || 0) - (timeA || 0)
+        })
+        const lastOrder = sortedOrders[0]
+        
+        if (lastOrder) {
+          const status = String(lastOrder.status || '').trim().toUpperCase()
+          
+          // ถ้าเป็น WAITING_SELL ใช้ราคา Buy, ถ้าเป็น SOLD ใช้ราคา Sell
+          if (status === 'WAITING_SELL') {
+            lastActionPrice = Number(lastOrder.priceBuy ?? 0)
+            priceSource = 'order_buy'
+          } else if (status === 'SOLD') {
+            lastActionPrice = Number(lastOrder.priceSellActual ?? 0)
+            priceSource = 'order_sell'
+          }
+        }
+      }
+      
+      // Fallback: ถ้าไม่มี order หรือราคาไม่ถูกต้อง ให้ใช้ราคาจาก chart data
+      if (!lastActionPrice || !Number.isFinite(lastActionPrice) || lastActionPrice <= 0) {
+        const lastDataPoint = chartData.length > 0 ? chartData[chartData.length - 1] : null
+        if (lastDataPoint) {
+          lastActionPrice = Number(lastDataPoint.close ?? lastDataPoint.value ?? lastDataPoint.price ?? 0)
+          priceSource = 'chart_data'
+        }
+      }
+
+      console.log('[Last Action] Debug:', {
+        toggleLastAction: buttons.toggleLastAction,
+        visible: lines.lastAction?.visible,
+        hasOrders,
+        ordersCount: hasOrders ? orders.length : 0,
+        lastActionPrice,
+        priceSource,
+        chartDataLength: chartData.length,
+      })
+
+      if (lastActionPrice !== null && Number.isFinite(lastActionPrice) && lastActionPrice > 0) {
+        const lineConfig = lines.lastAction
+        const lineType = lineConfig?.type || 'dot'
+        const lineColor = lineConfig?.color || '#808080' // สีเทา
+
+        console.log('[Last Action] Creating line:', {
+          price: lastActionPrice,
+          type: lineType,
+          color: lineColor,
+        })
+
+        try {
+          if (lineType === 'dot') {
+            // เส้นจุดแนวนอนเต็ม (gray dotted line)
+            const priceLine = candleSeries.createPriceLine({
+              price: lastActionPrice,
+              color: lineColor,
+              lineWidth: 1,
+              lineStyle: 1, // dotted
+              axisLabelVisible: true,
+              title: `Last Action ${lastActionPrice.toFixed(4)}`,
+            })
+            engine.tradePriceLines.push(priceLine)
+            console.log('[Last Action] Price line created and pushed:', priceLine)
+          } else if (lineType === 'lineSolid') {
+            // เส้นทึบแนวนอนเต็ม
+            const priceLine = candleSeries.createPriceLine({
+              price: lastActionPrice,
+              color: lineColor,
+              lineWidth: 2,
+              lineStyle: 0, // solid
+              axisLabelVisible: true,
+              title: `Last Action ${lastActionPrice.toFixed(4)}`,
+            })
+            engine.tradePriceLines.push(priceLine)
+            console.log('[Last Action] Price line created and pushed:', priceLine)
+          } else if (lineType === 'lineSeries') {
+            const currentTime = Math.floor(Date.now() / 1000)
+            const timeSpan = 60 * 60 * 24 // 24 hours
+            const lineSeries = chart.addLineSeries({
+              color: lineColor,
+              lineWidth: 2,
+              priceLineVisible: false,
+              lineStyle: 1, // dotted
+            })
+            lineSeries.setData([
+              { time: currentTime - timeSpan, value: lastActionPrice },
+              { time: currentTime + timeSpan, value: lastActionPrice },
+            ])
+            engine.tradeOverlays.push(lineSeries)
+            console.log('[Last Action] Line series created and pushed:', lineSeries)
+          } else if (lineType === 'markers') {
+            const currentTime = Math.floor(Date.now() / 1000)
+            markers.push({
+              time: currentTime,
+              position: 'inBar',
+              color: lineColor,
+              shape: 'circle',
+              text: `Last Action ${lastActionPrice.toFixed(4)}`,
+            })
+            console.log('[Last Action] Marker added to markers array')
+          }
+        } catch (err) {
+          console.error('[Last Action] Error creating line:', err)
+        }
+      } else {
+        console.warn('[Last Action] Invalid price, cannot create line:', lastActionPrice)
+      }
+    } else {
+      // Debug: log เพื่อตรวจสอบว่าทำไมไม่แสดง
+      if (buttons.toggleLastAction === false) {
+        console.warn('[Last Action] Disabled: toggleLastAction is false - click the "Last Action" button in toolbar')
+      }
+      if (lines.lastAction?.visible === false) {
+        console.warn('[Last Action] Disabled: visible is false - enable in Settings Modal')
       }
     }
 
@@ -2980,6 +3114,19 @@ export default function App() {
                   style={{ fontSize: '12px', padding: '4px 8px' }}
                 >
                   NextSell
+                </button>
+                <button
+                  className={`secondary small ${tradeLineSettings?.buttons?.toggleLastAction ? '' : 'ghost'}`}
+                  onClick={() =>
+                    setTradeLineSettings((prev) => ({
+                      ...prev,
+                      buttons: { ...prev?.buttons, toggleLastAction: !prev?.buttons?.toggleLastAction },
+                    }))
+                  }
+                  title="Toggle Last Action Line"
+                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                >
+                  Last Action
                 </button>
               </div>
               <button
@@ -5630,6 +5777,81 @@ export default function App() {
                             lines: {
                               ...prev?.lines,
                               nextSell: { ...prev?.lines?.nextSell, visible: e.target.checked },
+                            },
+                          }))
+                        }
+                      />
+                      <span style={{ fontSize: '12px' }}>Visible</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* Last Action Line */}
+              {tradeLineSettings?.buttons?.toggleLastAction !== false && (
+                <div style={{ marginBottom: '12px', padding: '10px', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <strong style={{ minWidth: '80px', fontSize: '14px' }}>Last Action</strong>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                      <span style={{ fontSize: '11px', opacity: 0.7 }}>Type</span>
+                      <select
+                        value={tradeLineSettings?.lines?.lastAction?.type || 'dot'}
+                        onChange={(e) =>
+                          setTradeLineSettings((prev) => ({
+                            ...prev,
+                            lines: {
+                              ...prev?.lines,
+                              lastAction: { ...prev?.lines?.lastAction, type: e.target.value },
+                            },
+                          }))
+                        }
+                        style={{ padding: '4px 8px', fontSize: '12px', minWidth: '100px' }}
+                      >
+                        <option value="markers">Markers</option>
+                        <option value="lineSeries">Line Series</option>
+                        <option value="lineSolid">Line Solid</option>
+                        <option value="dot">Dot</option>
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                      <span style={{ fontSize: '11px', opacity: 0.7 }}>Color</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div
+                          style={{
+                            width: '24px',
+                            height: '24px',
+                            borderRadius: '50%',
+                            backgroundColor: tradeLineSettings?.lines?.lastAction?.color || '#808080',
+                            border: '2px solid var(--border)',
+                            flexShrink: 0,
+                          }}
+                        />
+                        <input
+                          type="color"
+                          value={tradeLineSettings?.lines?.lastAction?.color || '#808080'}
+                          onChange={(e) =>
+                            setTradeLineSettings((prev) => ({
+                              ...prev,
+                              lines: {
+                                ...prev?.lines,
+                                lastAction: { ...prev?.lines?.lastAction, color: e.target.value },
+                              },
+                            }))
+                          }
+                          style={{ width: '40px', height: '28px', cursor: 'pointer' }}
+                        />
+                      </div>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto' }}>
+                      <input
+                        type="checkbox"
+                        checked={tradeLineSettings?.lines?.lastAction?.visible ?? true}
+                        onChange={(e) =>
+                          setTradeLineSettings((prev) => ({
+                            ...prev,
+                            lines: {
+                              ...prev?.lines,
+                              lastAction: { ...prev?.lines?.lastAction, visible: e.target.checked },
                             },
                           }))
                         }
