@@ -75,6 +75,31 @@ const buildUrl = (base, endpoint) => {
   return `${cleanBase}/${cleanEndpoint}`
 }
 
+// Cookie helper functions
+const setCookie = (name, value, days = 7) => {
+  if (typeof document === 'undefined') return
+  const expires = new Date()
+  expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000)
+  document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/`
+}
+
+const getCookie = (name) => {
+  if (typeof document === 'undefined') return null
+  const nameEQ = name + '='
+  const ca = document.cookie.split(';')
+  for (let i = 0; i < ca.length; i++) {
+    let c = ca[i]
+    while (c.charAt(0) === ' ') c = c.substring(1, c.length)
+    if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length)
+  }
+  return null
+}
+
+const deleteCookie = (name) => {
+  if (typeof document === 'undefined') return
+  document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/;`
+}
+
 const safeJSONParse = (value, fallback) => {
   try {
     return value ? JSON.parse(value) : fallback
@@ -340,6 +365,15 @@ const buildHorizontalLinesFromOrders = (orders = []) => {
 }
 
 export default function App() {
+  // Authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    const token = getCookie('authToken')
+    return !!token
+  })
+  const [loginError, setLoginError] = useState('')
+  const [loginLoading, setLoginLoading] = useState(false)
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' })
+
   const [activeTab, setActiveTab] = useState(() => loadPrimitiveState('activeTab', 'orders'))
   const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
   //const [apiBase, setApiBase] = useState('http://localhost:5081/api')
@@ -367,6 +401,7 @@ export default function App() {
   const [orderModalData, setOrderModalData] = useState(null)
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
   const [sellModalData, setSellModalData] = useState(null)
+  const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false)
   const [viewMode, setViewMode] = useState(() => loadPrimitiveState('viewMode', 'priceChart')) // 'chart', 'calculate', 'trade', 'priceChart'
   const [priceChartInterval, setPriceChartInterval] = useState(() =>
     loadPrimitiveState('priceChartInterval', '1m')
@@ -565,6 +600,49 @@ export default function App() {
     }),
     []
   )
+
+  // Login handler
+  const handleLogin = async (e) => {
+    e?.preventDefault()
+    setLoginError('')
+    setLoginLoading(true)
+
+    try {
+      // Simple validation - username: cayoshi, password: c4544142
+      if (loginForm.username === 'cayoshi' && loginForm.password === 'c4544142') {
+        // Generate a simple token (in production, this should come from API)
+        const token = btoa(`${loginForm.username}:${Date.now()}`)
+        setCookie('authToken', token, 7) // Save for 7 days
+        setIsAuthenticated(true)
+        setLoginError('')
+      } else {
+        setLoginError('Invalid username or password')
+      }
+    } catch (err) {
+      setLoginError('Login failed. Please try again.')
+      console.error('Login error:', err)
+    } finally {
+      setLoginLoading(false)
+    }
+  }
+
+  // Logout handler - show confirmation dialog
+  const handleLogout = () => {
+    setIsLogoutConfirmOpen(true)
+  }
+
+  // Confirm logout - actually perform logout
+  const confirmLogout = () => {
+    deleteCookie('authToken')
+    setIsAuthenticated(false)
+    setLoginForm({ username: 'cayoshi', password: 'c4544142' })
+    setIsLogoutConfirmOpen(false)
+  }
+
+  // Cancel logout
+  const cancelLogout = () => {
+    setIsLogoutConfirmOpen(false)
+  }
 
   const runRequest = async (key, endpoint, { method = 'POST', payload, onSuccess, onError } = {}) => {
     const url = buildUrl(apiBase, endpoint)
@@ -4990,6 +5068,63 @@ export default function App() {
     </section>
   )
 
+  // Render Login Page
+  if (!isAuthenticated) {
+    return (
+      <div className="app" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <div className="card" style={{ maxWidth: '400px', width: '100%', padding: '32px' }}>
+          <header style={{ marginBottom: '24px', textAlign: 'center' }}>
+            <h3>Login</h3>
+            <p className="eyebrow" style={{ marginTop: '8px' }}>Please enter your credentials</p>
+          </header>
+          
+          <form onSubmit={handleLogin}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <label>
+                Username
+                <input
+                  type="text"
+                  value={loginForm.username}
+                  onChange={(e) => setLoginForm((prev) => ({ ...prev, username: e.target.value }))}
+                  placeholder="Enter username"
+                  required
+                  style={{ marginTop: '8px' }}
+                />
+              </label>
+              
+              <label>
+                Password
+                <input
+                  type="password"
+                  value={loginForm.password}
+                  onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
+                  placeholder="Enter password"
+                  required
+                  style={{ marginTop: '8px' }}
+                />
+              </label>
+              
+              {loginError && (
+                <div className="state-block error" style={{ marginTop: '8px' }}>
+                  {loginError}
+                </div>
+              )}
+              
+              <button 
+                type="submit" 
+                className="primary" 
+                disabled={loginLoading}
+                style={{ marginTop: '8px' }}
+              >
+                {loginLoading ? 'Logging in...' : 'Login'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="app">
       {/* Alert Notifications */}
@@ -5187,6 +5322,15 @@ export default function App() {
         </button>
         <button className="top-control-btn" onClick={clearLogs} title="Clear All Logs">
           🗑
+        </button>
+        <button 
+          className="top-control-btn" 
+          onClick={handleLogout} 
+          title="Logout"
+          style={{ color: '#24A4D6FF',fontSize: '9px' }}
+
+        >
+          Logout
         </button>
       </div>
 
@@ -6183,6 +6327,30 @@ export default function App() {
           )
         })}
       </nav>
+
+      {/* Logout Confirmation Dialog */}
+      {isLogoutConfirmOpen && (
+        <div className="modal-backdrop" onClick={cancelLogout}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+            <header>
+              <h3>Confirm Logout</h3>
+            </header>
+            <div style={{ padding: '20px 0' }}>
+              <p style={{ margin: '0 0 20px 0', color: 'var(--text-muted)' }}>
+                Are you sure you want to logout?
+              </p>
+            </div>
+            <div className="button-group">
+              <button className="secondary ghost" type="button" onClick={cancelLogout}>
+                Cancel
+              </button>
+              <button className="primary" type="button" onClick={confirmLogout} style={{ background: '#ff6b8f', borderColor: '#ff6b8f' }}>
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
