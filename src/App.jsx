@@ -242,8 +242,12 @@ const toCandle = (raw) => {
 
   if ([time, open, high, low, close].some((v) => Number.isNaN(v))) return null
 
+  // Add 7 hours (25200 seconds) to convert UTC to GMT+7 (Thailand time)
+  const timeInSeconds = Math.floor(time / 1000)
+  const thailandTimeOffset = 7 * 60 * 60 // 7 hours in seconds
+
   return {
-    time: Math.floor(time / 1000),
+    time: timeInSeconds + thailandTimeOffset,
     open,
     high,
     low,
@@ -1214,11 +1218,10 @@ export default function App() {
     if (!value) return '-'
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return value
-    // Add offset hours
+    // Add offset hours to convert UTC to GMT+7 (Thailand time)
     const offsetDate = new Date(date.getTime() + offsetHours * 60 * 60 * 1000)
-    // Format with Bangkok timezone (+7)
+    // Format without timezone (since we already added the offset)
     return new Intl.DateTimeFormat('th-TH', {
-      timeZone: 'Asia/Bangkok',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -2008,10 +2011,11 @@ export default function App() {
         setPriceChartError(err)
         if (!priceChartEngineRef.current.allData.length) {
           const now = Math.floor(Date.now() / 1000)
+          const thailandTimeOffset = 7 * 60 * 60 // 7 hours in seconds
           const fallback = []
           let lastClose = 2
           for (let i = 59; i >= 0; i -= 1) {
-            const time = now - i * 60
+            const time = now - i * 60 + thailandTimeOffset
             const open = lastClose
             const close = open * (1 + (Math.random() - 0.5) * 0.02)
             const high = Math.max(open, close) * (1 + Math.random() * 0.01)
@@ -2101,8 +2105,11 @@ export default function App() {
           const payload = JSON.parse(event.data)
           const kline = payload?.k
           if (!kline) return
+          // Add 7 hours (25200 seconds) to convert UTC to GMT+7 (Thailand time)
+          const timeInSeconds = Math.floor(Number(kline.t) / 1000)
+          const thailandTimeOffset = 7 * 60 * 60 // 7 hours in seconds
           const candle = {
-            time: Math.floor(Number(kline.t) / 1000),
+            time: timeInSeconds + thailandTimeOffset,
             open: Number(kline.o),
             high: Number(kline.h),
             low: Number(kline.l),
@@ -2920,6 +2927,9 @@ export default function App() {
             timeVisible: true,
             secondsVisible: false,
             rightOffset: 12,
+          },
+          localization: {
+            timezone: 'Asia/Bangkok',
           },
           width: container.clientWidth,
           height: 420,
@@ -3864,9 +3874,9 @@ export default function App() {
                       </div>
                     )}
                     <div className="alert-log-item__footer">
-                      <span className="alert-log-item__time">{formatDateTime(log.timestamp)}</span>
+                      <span className="alert-log-item__time">{formatDateTimeWithOffset(log.timestamp, 7)}</span>
                       {log.readAt && (
-                        <span className="alert-log-item__read-time">Read: {formatDateTime(log.readAt)}</span>
+                        <span className="alert-log-item__read-time">Read: {formatDateTimeWithOffset(log.readAt, 7)}</span>
                       )}
                     </div>
                   </div>
@@ -4831,6 +4841,7 @@ export default function App() {
             <thead>
               <tr>
                 {[
+                  { key: 'createTime', label: 'Create Time' },
                   { key: 'orderId', label: 'Order ID' },
                   { key: 'symbol', label: 'Symbol' },
                   { key: 'side', label: 'Side' },
@@ -4840,7 +4851,6 @@ export default function App() {
                   { key: 'quoteQuantity', label: 'Quote Qty' },
                   { key: 'quantityFilled', label: 'Filled Qty' },
                   { key: 'quoteQuantityFilled', label: 'Filled Quote' },
-                  { key: 'createTime', label: 'Create Time' },
                   { key: 'status', label: 'Status' },
                 ].map((column) => (
                   <th key={column.key} onClick={() => handleFilledOrdersSort(column.key)}>
@@ -4864,6 +4874,7 @@ export default function App() {
                       : ''
                   }
                 >
+                  <td className="table-value">{formatDateTime(order.createTime)}</td>
                   <td className="table-value mono">{order.orderId}</td>
                   <td className="table-key">{order.symbol}</td>
                   <td
@@ -4883,8 +4894,6 @@ export default function App() {
                   <td className="table-value">{trimZeros(order.quoteQuantity)}</td>
                   <td className="table-value">{trimZeros(order.quantityFilled)}</td>
                   <td className="table-value">{trimZeros(order.quoteQuantityFilled)}</td>
-                  <td className="table-value">{trimZeros(order.quoteQuantityFilled)}</td>
-                  <td className="table-value">{formatDateTime(order.createTime)}</td>
                   <td className="table-value">{order.status}</td>
                 </tr>
               ))}
@@ -4927,7 +4936,7 @@ export default function App() {
                   <div className="alert-item__message">{alertMessage}</div>
                   {alert.timestamp && (
                     <div className="alert-item__time">
-                      {formatDateTime(alert.timestamp)}
+                      {formatDateTimeWithOffset(alert.timestamp, 7)}
                     </div>
                   )}
                 </div>
