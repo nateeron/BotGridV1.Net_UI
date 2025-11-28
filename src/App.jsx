@@ -64,6 +64,8 @@ const TradingViewWidget = () => {
   )
 }
 
+export default App
+
 const prettify = (value) => {
   if (value === null || value === undefined) return ''
   if (typeof value === 'string') return value
@@ -365,7 +367,7 @@ const buildHorizontalLinesFromOrders = (orders = []) => {
     .filter((line) => line.timestamp && Number.isFinite(line.price))
 }
 
-export default function App() {
+function App() {
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     const token = getCookie('authToken')
@@ -393,6 +395,10 @@ export default function App() {
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [settingsError, setSettingsError] = useState(null)
   const [selectedSettingId, setSelectedSettingId] = useState(null)
+  const selectedSetting = useMemo(() => {
+    if (!selectedSettingId) return null
+    return settings.find((item) => item.id === selectedSettingId) || null
+  }, [settings, selectedSettingId])
   const [modalSetting, setModalSetting] = useState(null)
   const [isSettingModalOpen, setIsSettingModalOpen] = useState(false)
   const [modalMode, setModalMode] = useState('edit')
@@ -529,7 +535,7 @@ export default function App() {
       buttons: {
         toggleAllLines: true,
         toggleWaitSell: true,
-        toggleBuy: false,
+        toggleBuy: true,
         toggleNextEntry: true,
         toggleNextSell: true,
         toggleLastAction: true,
@@ -537,12 +543,12 @@ export default function App() {
       styleOptions: ['lineSeries', 'lineSolid', 'dot', 'markers'],
       lines: {
         'buy-Sell': {
-          visible: false,
-          type: 'markers',
+          visible: true,
+          type: 'triangleUpDown',
           colorBuy: '#0066FF', // ฟ้า
           colorSell: '#FF55AA', // ชมพู
-          limit: 10, // Limit number of buy/sell plots to show
-          timeOffset: 7, // Time offset in hours (+7 hours)
+          limit: 3, // Limit number of buy/sell plots to show
+          timeOffset: 14, // Time offset in hours (+14 hours)
         },
         waitSell: {
           visible: true,
@@ -602,6 +608,28 @@ export default function App() {
     }),
     []
   )
+
+  const usdtCoinData = useMemo(
+    () => (allCoinsData?.coins || []).find((coin) => (coin?.coin || '').toUpperCase() === 'USDT') || null,
+    [allCoinsData]
+  )
+
+  const xrpCoinData = useMemo(
+    () => (allCoinsData?.coins || []).find((coin) => (coin?.coin || '').toUpperCase() === 'XRP') || null,
+    [allCoinsData]
+  )
+
+  const portfolioValueFromCoins = useMemo(
+    () => (usdtCoinData ? Number(usdtCoinData.quantity || 0) : null),
+    [usdtCoinData]
+  )
+
+  const xrpValuePerAmount = useMemo(() => {
+    if (!xrpCoinData || !selectedSetting?.buyAmountUSD) return null
+    const amount = Number(selectedSetting.buyAmountUSD || 1)
+    if (amount === 0) return null
+    return Number(xrpCoinData.valueInUSDT || 0) / amount
+  }, [xrpCoinData, selectedSetting?.buyAmountUSD])
 
   // Login handler
   const handleLogin = async (e) => {
@@ -1352,11 +1380,6 @@ export default function App() {
     }
   }
 
-  const selectedSetting = useMemo(() => {
-    if (!selectedSettingId) return null
-    return settings.find((item) => item.id === selectedSettingId) || null
-  }, [settings, selectedSettingId])
-
   const handleSettingSelect = (id) => {
     setSelectedSettingId(id)
   }
@@ -2007,8 +2030,8 @@ export default function App() {
 
     // Find last order (most recent)
     const sortedOrders = [...orders].sort((a, b) => {
-      const timeA = parseTimestamp(a.dateBuy ?? a.createTime)
-      const timeB = parseTimestamp(b.dateBuy ?? b.createTime)
+      const timeA = parseTimestamp(a.dateSell ?? a.dateBuy)
+      const timeB = parseTimestamp(b.dateSell ?? b.dateBuy)
       return (timeB || 0) - (timeA || 0)
     })
     const lastOrder = sortedOrders[0]
@@ -5216,20 +5239,33 @@ export default function App() {
                 {orderTotals.soldProfitLossTotal.toFixed(4)}
               </span>
             </div>
-            {spotReport?.portfolioValue !== undefined && (
+            {portfolioValueFromCoins !== null && (
               <div className="top-bar-item">
                 <span className="top-bar-label">Portfolio Value:</span>
                 <span className="top-bar-value" style={{ color: '#ffa500' }}>
-                  {Number(spotReport.portfolioValue || 0).toFixed(4)}
+                  {portfolioValueFromCoins.toFixed(4)}
                 </span>
               </div>
             )}
-            {spotReport?.portfolioValue !== undefined && selectedSetting?.buyAmountUSD && (
+            {portfolioValueFromCoins !== null && selectedSetting?.buyAmountUSD && (
               <div className="top-bar-item">
                 <span className="top-bar-label">จำนวนOrder:</span>
                 <span className="top-bar-value">
-                  {(Number(spotReport.portfolioValue || 0) / Number(selectedSetting.buyAmountUSD || 1)).toFixed(2)}
+                  {(portfolioValueFromCoins / Number(selectedSetting.buyAmountUSD || 1)).toFixed(2)}
                 </span>
+              </div>
+            )}
+            {xrpCoinData && (
+              <div className="top-bar-item" style={{ borderLeft: '1px solid rgba(255, 136, 0, 0.4)', paddingLeft: '12px' }}>
+                <span className="top-bar-label" style={{ color: '#ff8800' }}>XRP Snapshot:</span>
+                <span className="top-bar-value" style={{ display: 'block', fontSize: '13px' }}>
+                  Qty {Number(xrpCoinData.quantity || 0).toFixed(6)} | Value {Number(xrpCoinData.valueInUSDT || 0).toFixed(2)} USDT
+                </span>
+                {xrpValuePerAmount !== null && (
+                  <span className="top-bar-value" style={{ display: 'block', fontSize: '13px' }}>
+                    Value / Amount USD: {xrpValuePerAmount.toFixed(4)}
+                  </span>
+                )}
               </div>
             )}
           </div>
