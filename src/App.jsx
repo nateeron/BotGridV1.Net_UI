@@ -378,7 +378,8 @@ function App() {
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
 
   const [activeTab, setActiveTab] = useState(() => loadPrimitiveState('activeTab', 'orders'))
-  const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
+  //const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
+  const [apiBase, setApiBase] = useState('https://api.cayoshibot.com/api')
   //const [apiBase, setApiBase] = useState('http://localhost:5081/api')
   const [loadingKey, setLoadingKey] = useState(null)
   const [orders, setOrders] = useState([])
@@ -1162,7 +1163,7 @@ function App() {
 
     const connectOrders = async () => {
       try {
-        const baseUrl = apiBase.replace('/api', '')
+        const baseUrl = apiBase.endsWith('/api') ? apiBase.slice(0, -4) : apiBase
         connection = new signalR.HubConnectionBuilder()
           .withUrl(`${baseUrl}/hubs/orders`)
           .withAutomaticReconnect({
@@ -1236,7 +1237,7 @@ function App() {
 
     const connectAlerts = async () => {
       try {
-        const baseUrl = apiBase.replace('/api', '')
+        const baseUrl = apiBase.endsWith('/api') ? apiBase.slice(0, -4) : apiBase
         alertConnection = new signalR.HubConnectionBuilder()
           .withUrl(`${baseUrl}/hubs/alerts`)
           .withAutomaticReconnect({
