@@ -548,7 +548,7 @@ function App() {
           type: 'triangleUpDown',
           colorBuy: '#0066FF', // ฟ้า
           colorSell: '#FF55AA', // ชมพู
-          limit: 3, // Limit number of buy/sell plots to show
+          limit: 2, // Limit number of buy/sell plots to show
           timeOffset: 14, // Time offset in hours (+14 hours)
         },
         waitSell: {
@@ -2500,11 +2500,11 @@ function App() {
       const limit = lineConfig.limit ?? 10
       const timeOffsetHours = lineConfig.timeOffset ?? 7
       const timeOffsetSeconds = timeOffsetHours * 60 * 60 // Convert hours to seconds
-      
+    
       // Sort orders by most recent first (by buy time or create time)
       const sortedOrders = [...orders].sort((a, b) => {
-        const timeA = normalizeTimeSec(a.dateBuy ?? a.createTime) || 0
-        const timeB = normalizeTimeSec(b.dateBuy ?? b.createTime) || 0
+        const timeA = normalizeTimeSec(a.dateSell ??a.dateBuy) || 0
+        const timeB = normalizeTimeSec(b.dateSell ??b.dateBuy) || 0
         return timeB - timeA // Most recent first
       })
       
@@ -2938,12 +2938,11 @@ function App() {
     if (shouldShowLastAction) {
       let lastActionPrice = null
       let priceSource = 'none'
-      
       // Find last order (most recent) - same logic as calculateNextEntry
       if (hasOrders && Array.isArray(orders) && orders.length > 0) {
         const sortedOrders = [...orders].sort((a, b) => {
-          const timeA = parseTimestamp(a.dateBuy ?? a.createTime)
-          const timeB = parseTimestamp(b.dateBuy ?? b.createTime)
+          const timeA = parseTimestamp( a.dateSell ??a.dateBuy)
+          const timeB = parseTimestamp( b.dateSell ??b.dateBuy)
           return (timeB || 0) - (timeA || 0)
         })
         const lastOrder = sortedOrders[0]
@@ -3635,11 +3634,11 @@ function App() {
 
           <div className="calculate-results">
             <div className="result-item">
-              <span className="result-label">Sum 1 - Cal1 to Cal2 = ? %</span>
+              <span className="result-label">Cal1 to Cal2 = ? %</span>
               <span className="result-value">{calculateSum1()}</span>
             </div>
             <div className="result-item">
-              <span className="result-label">Sum 2 - Cal1 as % of Cal2 = ? %</span>
+              <span className="result-label">Cal1 as % of Cal2 = ? %</span>
               <span className="result-value">{calculateSum2()}</span>
             </div>
             <div className="result-item">
@@ -3716,15 +3715,15 @@ function App() {
               </label>
             </div>
             <div className="result-item">
-              <span className="result-label">Sum 3 - Cal1 - % = ?</span>
+              <span className="result-label">Cal1 - % = ?</span>
               <span className="result-value">{calculateSum3().minus}</span>
             </div>
             <div className="result-item">
-              <span className="result-label">Sum 3 - Cal1 + % = ?</span>
+              <span className="result-label">Cal1 + % = ?</span>
               <span className="result-value">{calculateSum3().plus}</span>
             </div>
             <div className="result-item">
-              <span className="result-label">Sum 4 - % of Cal1 = ?</span>
+              <span className="result-label">% of Cal1 = ?</span>
               <span className="result-value">{calculateSum4()}</span>
             </div>
           </div>
@@ -6385,13 +6384,13 @@ function App() {
                       <input
                         type="number"
                         min="1"
-                        value={tradeLineSettings?.lines?.['buy-Sell']?.limit ?? 3}
+                        value={tradeLineSettings?.lines?.['buy-Sell']?.limit ?? 2}
                         onChange={(e) =>
                           setTradeLineSettings((prev) => ({
                             ...prev,
                             lines: {
                               ...prev?.lines,
-                              'buy-Sell': { ...prev?.lines?.['buy-Sell'], limit: parseInt(e.target.value) || 3 },
+                              'buy-Sell': { ...prev?.lines?.['buy-Sell'], limit: parseInt(e.target.value) || 2 },
                             },
                           }))
                         }
