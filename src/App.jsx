@@ -487,6 +487,7 @@ function App() {
     return stored !== null ? Number(stored) : null
   })
   const [reportPeriod, setReportPeriod] = useState(() => loadPrimitiveState('reportPeriod', '1M'))
+  const [orderChartView, setOrderChartView] = useState(() => loadPrimitiveState('orderChartView', 'day')) // 'day' or 'month'
   const [allCoinsData, setAllCoinsData] = useState({
     coins: [],
     totalValueUSD: 0,
@@ -1104,6 +1105,11 @@ function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
+    sessionStorage.setItem('orderChartView', orderChartView)
+  }, [orderChartView])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
     sessionStorage.setItem('tradeForm', JSON.stringify(tradeForm))
   }, [tradeForm])
 
@@ -1388,6 +1394,73 @@ function App() {
     if (!id) return botStatuses.global || null
     return botStatuses[id] || botStatuses[String(id)] || botStatuses.global || null
   }
+
+  const ordersForChart = useMemo(() => {
+    if (!reportConfigId) return []
+    const targetId = Number(reportConfigId)
+    if (!Number.isFinite(targetId)) return []
+    return (orders || []).filter((order) => {
+      const orderConfigId = Number(
+        order?.setting_ID ??
+          order?.settingId ??
+          order?.settingID ??
+          order?.ConfigId ??
+          order?.configId ??
+          order?.configID ??
+          order?.config_id ??
+          order?.settingID_PK ??
+          order?.SettingId
+      )
+      if (!Number.isFinite(orderConfigId)) return false
+      return orderConfigId === targetId
+    })
+  }, [orders, reportConfigId])
+
+  const processOrdersForChart = useMemo(() => {
+    if (!Array.isArray(ordersForChart) || ordersForChart.length === 0) return []
+    
+    const chartData = {}
+    const isMonthly = orderChartView === 'month'
+    
+    ordersForChart.forEach((order) => {
+      // Process Buy orders
+      if (order.dateBuy) {
+        const buyTimestamp = parseTimestamp(order.dateBuy)
+        if (buyTimestamp) {
+          const date = new Date(buyTimestamp)
+          const key = isMonthly 
+            ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+            : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+          
+          if (!chartData[key]) {
+            chartData[key] = { date: key, buy: 0, sell: 0 }
+          }
+          chartData[key].buy += 1
+        }
+      }
+      
+      // Process Sell orders
+      if (order.dateSell) {
+        const sellTimestamp = parseTimestamp(order.dateSell)
+        if (sellTimestamp) {
+          const date = new Date(sellTimestamp)
+          const key = isMonthly 
+            ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+            : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+          
+          if (!chartData[key]) {
+            chartData[key] = { date: key, buy: 0, sell: 0 }
+          }
+          chartData[key].sell += 1
+        }
+      }
+    })
+    
+    // Convert to array and sort by date
+    return Object.values(chartData)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-30) // Show last 30 periods
+  }, [ordersForChart, orderChartView])
 
   const buildOrderDraft = (order) => {
     if (!order) return null
@@ -4887,6 +4960,301 @@ function App() {
           )}
         </div>
       )}
+
+      {/* Orders Chart Section */}
+      <div style={{ marginTop: '32px', padding: '20px', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '12px', flexWrap: 'wrap' }}>
+          <h4 style={{ margin: 0, fontSize: '16px', color: '#00d1ff' }}>
+            Orders Chart - Buy/Sell Count
+          </h4>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              className={`secondary small ${orderChartView === 'day' ? '' : 'ghost'}`}
+              onClick={() => setOrderChartView('day')}
+              style={{ fontSize: '12px', padding: '4px 12px' }}
+              disabled={!reportConfigId}
+            >
+              Day
+            </button>
+            <button
+              className={`secondary small ${orderChartView === 'month' ? '' : 'ghost'}`}
+              onClick={() => setOrderChartView('month')}
+              style={{ fontSize: '12px', padding: '4px 12px' }}
+              disabled={!reportConfigId}
+            >
+              Month
+            </button>
+          </div>
+        </div>
+
+        {!reportConfigId && (
+          <div className="state-block empty" style={{ marginTop: '20px' }}>
+            กรุณาเลือก Setting เพื่อแสดงกราฟ Order
+          </div>
+        )}
+
+        {reportConfigId && ordersLoading && (
+          <div className="state-block" style={{ marginTop: '20px' }}>
+            กำลังโหลด Orders...
+          </div>
+        )}
+
+        {reportConfigId && !ordersLoading && (
+          <>
+            {processOrdersForChart.length > 0 ? (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                {/* Y-Axis Scale */}
+                {(() => {
+                  const maxCount = processOrdersForChart.reduce(
+                    (max, item) => Math.max(max, item.buy, item.sell),
+                    1
+                  )
+                  const scaleSteps = 5
+                  const stepValue = Math.ceil(maxCount / scaleSteps)
+                  const roundedMax = stepValue * scaleSteps
+                  
+                  return (
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        height: '260px',
+                        padding: '16px 0',
+                        minWidth: '40px',
+                        fontSize: '10px',
+                        color: 'var(--text-muted)',
+                        textAlign: 'right',
+                      }}
+                    >
+                      {Array.from({ length: scaleSteps + 1 }, (_, i) => {
+                        const value = roundedMax - (i * stepValue)
+                        return (
+                          <div key={i} style={{ lineHeight: '1' }}>
+                            {value}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+                
+                {/* Chart Bars */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    gap: '4px',
+                    height: '260px',
+                    padding: '16px 0',
+                    borderTop: '1px solid var(--border)',
+                    borderBottom: '1px solid var(--border)',
+                    borderLeft: '1px solid var(--border)',
+                    flex: '1',
+                    overflowX: 'auto',
+                    overflowY: 'visible',
+                    position: 'relative',
+                  }}
+                >
+                  {/* Grid Lines */}
+                  {(() => {
+                    const maxCount = processOrdersForChart.reduce(
+                      (max, item) => Math.max(max, item.buy, item.sell),
+                      1
+                    )
+                    const scaleSteps = 5
+                    const stepValue = Math.ceil(maxCount / scaleSteps)
+                    const roundedMax = stepValue * scaleSteps
+                    
+                    return (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: '16px',
+                          left: 0,
+                          right: 0,
+                          bottom: '16px',
+                          pointerEvents: 'none',
+                        }}
+                      >
+                        {Array.from({ length: scaleSteps + 1 }, (_, i) => {
+                          const percentage = (i / scaleSteps) * 100
+                          return (
+                            <div
+                              key={i}
+                              style={{
+                                position: 'absolute',
+                                left: 0,
+                                right: 0,
+                                top: `${percentage}%`,
+                                borderTop: '1px dashed rgba(255, 255, 255, 0.1)',
+                              }}
+                            />
+                          )
+                        })}
+                      </div>
+                    )
+                  })()}
+                  <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', width: '100%', position: 'relative', zIndex: 1, height: '228px', padding: '0 4px' }}>
+                  {(() => {
+                    const maxCount = processOrdersForChart.reduce(
+                      (max, item) => Math.max(max, item.buy, item.sell),
+                      1
+                    )
+                    return processOrdersForChart.map((item, index) => {
+                      const buyHeight = maxCount > 0 ? (item.buy / maxCount) * 100 : 0
+                      const sellHeight = maxCount > 0 ? (item.sell / maxCount) * 100 : 0
+                      return (
+                        <div
+                          key={index}
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '4px',
+                            minWidth: '42px',
+                            flex: '1 1 auto',
+                            height: '100%',
+                          }}
+                        >
+                        <div
+                          style={{
+                            display: 'flex',
+                            gap: '4px',
+                            alignItems: 'flex-end',
+                            width: '100%',
+                            height: '228px',
+                          }}
+                        >
+                          {/* Buy Bar */}
+                          <div
+                            style={{
+                              flex: '0 0 8px',
+                              backgroundColor: 'rgba(0, 102, 255, 0.35)',
+                              height: `${buyHeight}%`,
+                              minHeight: item.buy > 0 ? '4px' : '0',
+                              borderRadius: '999px 999px 0 0',
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              justifyContent: 'center',
+                              paddingTop: '2px',
+                              border: '1px solid rgba(0, 102, 255, 0.6)',
+                              transition: 'all 0.2s ease',
+                            }}
+                            title={`Buy: ${item.buy}`}
+                          >
+                            {item.buy > 0 && (
+                              <span
+                                style={{
+                                  fontSize: '9px',
+                                  color: '#fff',
+                                  fontWeight: 'bold',
+                                  textShadow: '0 1px 2px rgba(0,0,0,0.4)',
+                                }}
+                              >
+                                {item.buy}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Sell Bar */}
+                          <div
+                            style={{
+                              flex: '0 0 8px',
+                              backgroundColor: 'rgba(255, 85, 170, 0.35)',
+                              height: `${sellHeight}%`,
+                              minHeight: item.sell > 0 ? '4px' : '0',
+                              borderRadius: '999px 999px 0 0',
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              justifyContent: 'center',
+                              paddingTop: '2px',
+                              border: '1px solid rgba(255, 85, 170, 0.6)',
+                              transition: 'all 0.2s ease',
+                            }}
+                            title={`Sell: ${item.sell}`}
+                          >
+                            {item.sell > 0 && (
+                              <span
+                                style={{
+                                  fontSize: '9px',
+                                  color: '#fff',
+                                  fontWeight: 'bold',
+                                  textShadow: '0 1px 2px rgba(0,0,0,0.4)',
+                                }}
+                              >
+                                {item.sell}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Date Label */}
+                        <div
+                          style={{
+                            fontSize: '9px',
+                            color: 'var(--text-muted)',
+                            textAlign: 'center',
+                            whiteSpace: 'nowrap',
+                            marginTop: '8px',
+                            width: '100%',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {orderChartView === 'month'
+                            ? item.date.replace(/(\d{4})-(\d{2})/, '$2/$1')
+                            : item.date.replace(/(\d{4})-(\d{2})-(\d{2})/, '$3/$2')}
+                        </div>
+                      </div>
+                    )
+                  })
+                })()}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="state-block empty" style={{ marginTop: '20px' }}>
+                ไม่มีข้อมูล Order สำหรับแสดงกราฟในช่วงที่เลือก
+              </div>
+            )}
+
+            {/* Legend */}
+            <div
+              style={{
+                display: 'flex',
+                gap: '20px',
+                justifyContent: 'center',
+                marginTop: '16px',
+                fontSize: '12px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div
+                  style={{
+                    width: '16px',
+                    height: '16px',
+                    backgroundColor: '#0066FF',
+                    borderRadius: '2px',
+                  }}
+                />
+                <span>Buy Orders</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div
+                  style={{
+                    width: '16px',
+                    height: '16px',
+                    backgroundColor: '#FF55AA',
+                    borderRadius: '2px',
+                  }}
+                />
+                <span>Sell Orders</span>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
 
       {allCoinsError && <div className="state-block error">โหลด Coins ไม่ได้: {prettify(allCoinsError)}</div>}
       {allCoinsLoading && <div className="state-block">กำลังโหลด Coins...</div>}
