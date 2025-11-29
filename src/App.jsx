@@ -420,7 +420,16 @@ function App() {
   const [priceChartData, setPriceChartData] = useState([])
   const [priceChartLoading, setPriceChartLoading] = useState(false)
   const [priceChartError, setPriceChartError] = useState(null)
+  const [priceScaleMargins, setPriceScaleMargins] = useState({ top: 0.1, bottom: 0.1 })
+  const [priceChartHeight, setPriceChartHeight] = useState(() => {
+    const saved = localStorage.getItem('priceChartHeight')
+    return saved ? parseInt(saved, 10) : 420
+  })
+  const [isPriceChartFullscreen, setIsPriceChartFullscreen] = useState(false)
   const priceChartContainerRef = useRef(null)
+  const priceChartResizerRef = useRef(null)
+  const priceChartFullscreenRef = useRef(null)
+  const isResizingRef = useRef(false)
   const priceChartInstanceRef = useRef(null)
   const priceSeriesRef = useRef(null)
   const priceChartEngineRef = useRef({
@@ -3161,7 +3170,7 @@ function App() {
             timezone: 'Asia/Bangkok',
           },
           width: container.clientWidth,
-          height: 420,
+          height: priceChartHeight,
         })
 
         const ensureSeriesSupport = () => {
@@ -3398,6 +3407,86 @@ function App() {
     updateNextEntryLine()
   }, [activeTab, priceChartData, updateNextEntryLine, viewMode])
 
+  // Save chart height to localStorage
+  useEffect(() => {
+    localStorage.setItem('priceChartHeight', priceChartHeight.toString())
+  }, [priceChartHeight])
+
+  // Update chart height when priceChartHeight or fullscreen changes
+  useEffect(() => {
+    if (!priceChartInstanceRef.current) return
+    try {
+      const calculateHeight = () => {
+        if (isPriceChartFullscreen) {
+          const header = priceChartFullscreenRef.current?.querySelector('.price-chart-header')
+          const headerHeight = header ? header.offsetHeight : 60
+          return window.innerHeight - headerHeight - 8
+        }
+        return priceChartHeight
+      }
+      const chartHeight = calculateHeight()
+      priceChartInstanceRef.current.applyOptions({ height: chartHeight })
+    } catch (err) {
+      console.warn('Failed to update chart height:', err)
+    }
+  }, [priceChartHeight, isPriceChartFullscreen])
+
+  // Handle window resize in fullscreen mode
+  useEffect(() => {
+    if (!isPriceChartFullscreen) return
+
+    const handleResize = () => {
+      if (!priceChartInstanceRef.current) return
+      try {
+        const header = priceChartFullscreenRef.current?.querySelector('.price-chart-header')
+        const headerHeight = header ? header.offsetHeight : 60
+        const chartHeight = window.innerHeight - headerHeight - 8
+        priceChartInstanceRef.current.applyOptions({ 
+          width: window.innerWidth,
+          height: chartHeight 
+        })
+      } catch (err) {
+        console.warn('Failed to update chart size on resize:', err)
+      }
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [isPriceChartFullscreen])
+
+  // Handle chart resizer drag
+  const handleResizerMouseDown = useCallback((e) => {
+    e.preventDefault()
+    isResizingRef.current = true
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+
+    const handleMouseMove = (moveEvent) => {
+      if (!isResizingRef.current) return
+      moveEvent.preventDefault()
+      const container = priceChartContainerRef.current
+      if (!container) return
+      
+      const containerRect = container.getBoundingClientRect()
+      const newHeight = moveEvent.clientY - containerRect.top
+      const minHeight = 200
+      const maxHeight = 800
+      const clampedHeight = Math.max(minHeight, Math.min(maxHeight, newHeight))
+      setPriceChartHeight(clampedHeight)
+    }
+
+    const handleMouseUp = () => {
+      isResizingRef.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [])
+
   const handlePriceChartIntervalChange = (value) => {
     if (!value || value === priceChartInterval) return
     setPriceChartInterval(value)
@@ -3417,6 +3506,93 @@ function App() {
     [customChartSymbol, loadInitialCandles, startRealtimeFeed, stopRealtimeFeed, viewMode]
   )
 
+  const handlePriceScaleZoomIn = useCallback(() => {
+    const series = priceSeriesRef.current
+    if (!series || typeof series.priceScale !== 'function') return
+    
+    try {
+      const newMargins = {
+        top: Math.max(0, priceScaleMargins.top - 0.05),
+        bottom: Math.max(0, priceScaleMargins.bottom - 0.05),
+      }
+      setPriceScaleMargins(newMargins)
+      const priceScale = series.priceScale()
+      priceScale.applyOptions({
+        scaleMargins: newMargins,
+        autoScale: false,
+      })
+    } catch (err) {
+      console.warn('Failed to zoom in price scale:', err)
+    }
+  }, [priceScaleMargins])
+
+  const handlePriceScaleZoomOut = useCallback(() => {
+    const series = priceSeriesRef.current
+    if (!series || typeof series.priceScale !== 'function') return
+    
+    try {
+      const newMargins = {
+        top: Math.min(0.5, priceScaleMargins.top + 0.05),
+        bottom: Math.min(0.5, priceScaleMargins.bottom + 0.05),
+      }
+      setPriceScaleMargins(newMargins)
+      const priceScale = series.priceScale()
+      priceScale.applyOptions({
+        scaleMargins: newMargins,
+        autoScale: false,
+      })
+    } catch (err) {
+      console.warn('Failed to zoom out price scale:', err)
+    }
+  }, [priceScaleMargins])
+
+  const handlePriceScaleReset = useCallback(() => {
+    const series = priceSeriesRef.current
+    if (!series || typeof series.priceScale !== 'function') return
+    
+    try {
+      const defaultMargins = { top: 0.1, bottom: 0.1 }
+      setPriceScaleMargins(defaultMargins)
+      const priceScale = series.priceScale()
+      priceScale.applyOptions({
+        scaleMargins: defaultMargins,
+        autoScale: true,
+      })
+    } catch (err) {
+      console.warn('Failed to reset price scale:', err)
+    }
+  }, [])
+
+  const handlePriceChartFullscreen = useCallback(() => {
+    setIsPriceChartFullscreen((prev) => !prev)
+  }, [])
+
+  const handlePriceChartExitFullscreen = useCallback(() => {
+    setIsPriceChartFullscreen(false)
+  }, [])
+
+  // Handle ESC key to exit fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && isPriceChartFullscreen) {
+        handlePriceChartExitFullscreen()
+      }
+    }
+
+    if (isPriceChartFullscreen) {
+      document.addEventListener('keydown', handleKeyDown)
+      // Prevent body scroll when in fullscreen
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      document.body.style.overflow = ''
+    }
+  }, [isPriceChartFullscreen, handlePriceChartExitFullscreen])
+
   const renderPriceChart = () => {
     const lastDataPoint = priceChartData.length > 0 ? priceChartData[priceChartData.length - 1] : null
     const numericLastPrice = lastDataPoint
@@ -3424,9 +3600,41 @@ function App() {
       : null
     const lastPrice =
       numericLastPrice !== null && Number.isFinite(numericLastPrice) ? numericLastPrice.toFixed(4) : null
+    
+    const fullscreenStyle = isPriceChartFullscreen
+      ? {
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: '100vw',
+          height: '100vh',
+          zIndex: 9999,
+          backgroundColor: '#0d1524',
+          margin: 0,
+          borderRadius: 0,
+        }
+      : {}
+
+    // Calculate chart height - use window height in fullscreen, otherwise use saved height
+    const getChartHeight = () => {
+      if (isPriceChartFullscreen) {
+        const header = priceChartFullscreenRef.current?.querySelector('.price-chart-header')
+        const headerHeight = header ? header.offsetHeight : 60
+        return window.innerHeight - headerHeight - 8 // Subtract header and some padding
+      }
+      return priceChartHeight
+    }
+    const chartHeight = getChartHeight()
+
     return (
-      <div className="price-chart-full-width">
-        <section className="card price-chart-card">
+      <div 
+        className="price-chart-full-width" 
+        ref={priceChartFullscreenRef}
+        style={fullscreenStyle}
+      >
+        <section className="card price-chart-card" style={fullscreenStyle}>
           <header className="price-chart-header">
             <div>
               <p className="eyebrow">Price Chart</p>
@@ -3551,8 +3759,41 @@ function App() {
               >
                 ⚙
               </button>
+              <div style={{ display: 'flex', gap: '4px', alignItems: 'center', borderLeft: '1px solid var(--border)', paddingLeft: '8px', marginLeft: '8px' }}>
+                <button
+                  className="secondary small"
+                  onClick={handlePriceScaleZoomOut}
+                  title="Zoom Out Scale (ปรับ scale ลง)"
+                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                >
+                  ➖
+                </button>
+                <button
+                  className="secondary small"
+                  onClick={handlePriceScaleReset}
+                  title="Reset Scale (รีเซ็ต scale)"
+                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                >
+                  ↺
+                </button>
+                <button
+                  className="secondary small"
+                  onClick={handlePriceScaleZoomIn}
+                  title="Zoom In Scale (ปรับ scale ขึ้น)"
+                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                >
+                  ➕
+                </button>
+              </div>
               <button className="secondary ghost" onClick={fetchPriceData} disabled={priceChartLoading}>
                 {priceChartLoading ? 'Loading...' : 'Refresh'}
+              </button>
+              <button
+                className="secondary ghost"
+                onClick={isPriceChartFullscreen ? handlePriceChartExitFullscreen : handlePriceChartFullscreen}
+                title={isPriceChartFullscreen ? 'Exit Fullscreen (ESC)' : 'Fullscreen (ขยายเต็มหน้าจอ)'}
+              >
+                {isPriceChartFullscreen ? '⤓' : '⤢'}
               </button>
             </div>
           </header>
@@ -3566,10 +3807,43 @@ function App() {
             className="price-chart-canvas"
             style={{
               width: '100%',
-              height: '420px',
+              height: `${chartHeight}px`,
               position: 'relative',
             }}
           />
+          {!isPriceChartFullscreen && (
+            <div
+              ref={priceChartResizerRef}
+              onMouseDown={handleResizerMouseDown}
+              style={{
+                width: '100%',
+                height: '8px',
+                cursor: 'row-resize',
+                backgroundColor: 'var(--border)',
+                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'background-color 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--primary)'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--border)'
+              }}
+              title="ลากเพื่อปรับขนาดชาร์ต (Drag to resize chart)"
+            >
+              <div
+                style={{
+                  width: '40px',
+                  height: '3px',
+                  backgroundColor: 'var(--text-secondary)',
+                  borderRadius: '2px',
+                }}
+              />
+            </div>
+          )}
         </section>
       </div>
     )
