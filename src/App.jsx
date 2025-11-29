@@ -1422,13 +1422,15 @@ function App() {
     
     const chartData = {}
     const isMonthly = orderChartView === 'month'
+    const timeOffsetHours = 7
+    const timeOffsetMs = timeOffsetHours * 60 * 60 * 1000 // Convert hours to milliseconds
     
     ordersForChart.forEach((order) => {
       // Process Buy orders
       if (order.dateBuy) {
         const buyTimestamp = parseTimestamp(order.dateBuy)
         if (buyTimestamp) {
-          const date = new Date(buyTimestamp)
+          const date = new Date(buyTimestamp + timeOffsetMs)
           const key = isMonthly 
             ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
             : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -1444,7 +1446,7 @@ function App() {
       if (order.dateSell) {
         const sellTimestamp = parseTimestamp(order.dateSell)
         if (sellTimestamp) {
-          const date = new Date(sellTimestamp)
+          const date = new Date(sellTimestamp + timeOffsetMs)
           const key = isMonthly 
             ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
             : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -5122,14 +5124,15 @@ function App() {
                             display: 'flex',
                             gap: '4px',
                             alignItems: 'flex-end',
-                            width: '100%',
+                            justifyContent: 'center',
                             height: '228px',
+                            width: '100%',
                           }}
                         >
                           {/* Buy Bar */}
                           <div
                             style={{
-                              flex: '0 0 8px',
+                              width: '20px',
                               backgroundColor: 'rgba(0, 102, 255, 0.35)',
                               height: `${buyHeight}%`,
                               minHeight: item.buy > 0 ? '4px' : '0',
@@ -5160,7 +5163,7 @@ function App() {
                           {/* Sell Bar */}
                           <div
                             style={{
-                              flex: '0 0 8px',
+                              width: '20px',
                               backgroundColor: 'rgba(255, 85, 170, 0.35)',
                               height: `${sellHeight}%`,
                               minHeight: item.sell > 0 ? '4px' : '0',
@@ -5631,7 +5634,7 @@ function App() {
                 </span>
                 {xrpValuePerAmount !== null && (
                   <span className="top-bar-value" style={{ display: 'block', fontSize: '13px' }}>
-                    Value / Amount USD: {xrpValuePerAmount.toFixed(4)}
+                    จำนวนOrder: {xrpValuePerAmount.toFixed(4)}
                   </span>
                 )}
               </div>
