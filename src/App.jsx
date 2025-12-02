@@ -2599,7 +2599,7 @@ function App() {
               color: buyColor,
               lineWidth: 2,
               priceLineVisible: false,
-              lineStyle: 1,
+              lineStyle: 0, // solid line (เส้นทึบ)
             })
             const timeSpan = 5 * 60 // 5 minutes
             lineSeries.setData([
@@ -2683,7 +2683,7 @@ function App() {
               color: sellColor,
               lineWidth: 2,
               priceLineVisible: false,
-              lineStyle: 1,
+              lineStyle: 0, // solid line (เส้นทึบ)
             })
             const timeSpan = 5 * 60 // 5 minutes
             lineSeries.setData([
