@@ -2144,7 +2144,8 @@ function App() {
     } else if (status === 'SOLD') {
       // nextEntry = SellPrice - (SellPrice * PERCEN_SELL / 100)
       if (sellPrice > 0) {
-        return sellPrice - (sellPrice * percenSell / 100)
+        return sellPrice - (sellPrice * percenBuy / 100)
+        //return sellPrice - (sellPrice * percenSell / 100)
       }
     }
 
