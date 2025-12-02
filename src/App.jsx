@@ -555,10 +555,10 @@ function App() {
       lines: {
         'buy-Sell': {
           visible: true,
-          type: 'triangleUpDown',
+          type: 'lineSeries',
           colorBuy: '#0066FF', // ฟ้า
           colorSell: '#FF55AA', // ชมพู
-          limit: 2, // Limit number of buy/sell plots to show
+          limit: 200, // Limit number of buy/sell plots to show
           timeOffset: 14, // Time offset in hours (+14 hours)
         },
         waitSell: {
@@ -2600,7 +2600,7 @@ function App() {
               priceLineVisible: false,
               lineStyle: 1,
             })
-            const timeSpan = 60 * 60 // 1 hour
+            const timeSpan = 5 * 60 // 5 minutes
             lineSeries.setData([
               { time: buyTime, value: buyPrice },
               { time: buyTime + timeSpan, value: buyPrice },
@@ -2684,7 +2684,7 @@ function App() {
               priceLineVisible: false,
               lineStyle: 1,
             })
-            const timeSpan = 60 * 60 // 1 hour
+            const timeSpan = 5 * 60 // 5 minutes
             lineSeries.setData([
               { time: sellTime, value: sellPrice },
               { time: sellTime + timeSpan, value: sellPrice },
@@ -6580,7 +6580,7 @@ function App() {
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
                       <span style={{ fontSize: '11px', opacity: 0.7 }}>Type</span>
                       <select
-                        value={tradeLineSettings?.lines?.['buy-Sell']?.type || 'markers'}
+                        value={tradeLineSettings?.lines?.['buy-Sell']?.type || 'lineSeries'}
                         onChange={(e) =>
                           setTradeLineSettings((prev) => ({
                             ...prev,
@@ -6665,13 +6665,13 @@ function App() {
                       <input
                         type="number"
                         min="1"
-                        value={tradeLineSettings?.lines?.['buy-Sell']?.limit ?? 2}
+                        value={tradeLineSettings?.lines?.['buy-Sell']?.limit ?? 200}
                         onChange={(e) =>
                           setTradeLineSettings((prev) => ({
                             ...prev,
                             lines: {
                               ...prev?.lines,
-                              'buy-Sell': { ...prev?.lines?.['buy-Sell'], limit: parseInt(e.target.value) || 2 },
+                              'buy-Sell': { ...prev?.lines?.['buy-Sell'], limit: parseInt(e.target.value) || 200 },
                             },
                           }))
                         }
