@@ -2128,6 +2128,9 @@ function App() {
     const percenBuy = relatedSetting
       ? Number(relatedSetting.perceN_BUY ?? relatedSetting.PERCEN_BUY ?? 0)
       : Number(settings[0]?.perceN_BUY ?? settings[0]?.PERCEN_BUY ?? 0.4) || 0.4
+    const percenSell = relatedSetting
+      ? Number(relatedSetting.perceN_SELL ?? relatedSetting.PERCEN_SELL ?? 0)
+      : Number(settings[0]?.perceN_SELL ?? settings[0]?.PERCEN_SELL ?? 0.4) || 0.4
 
     const status = String(lastOrder.status || '').toUpperCase()
     const buyPrice = Number(lastOrder.priceBuy ?? 0)
@@ -2139,9 +2142,9 @@ function App() {
         return buyPrice - (buyPrice * percenBuy / 100)
       }
     } else if (status === 'SOLD') {
-      // nextEntry = SellPrice - (SellPrice * PERCEN_BUY / 100)
+      // nextEntry = SellPrice - (SellPrice * PERCEN_SELL / 100)
       if (sellPrice > 0) {
-        return sellPrice - (sellPrice * percenBuy / 100)
+        return sellPrice - (sellPrice * percenSell / 100)
       }
     }
 
