@@ -5,6 +5,7 @@ import iconSOL from './icon/XTVCSOL--big.svg'
 import iconUSDT from './icon/XTVCUSDT--big.svg'
 import iconXRP from './icon/XTVCXRP--big.svg'
 import alertSound from './sound/sound-Buy-Sell.mp3'
+import config from '../config.json'
 
 const tabs = [
   { key: 'orders', label: 'Orders', icon: '📦' },
@@ -379,7 +380,16 @@ function App() {
 
   const [activeTab, setActiveTab] = useState(() => loadPrimitiveState('activeTab', 'orders'))
   //const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
-  const [apiBase, setApiBase] = useState('https://api.cayoshibot.com/api')
+  const getApiBaseUrl = () => {
+    const mode = import.meta.env.MODE
+    if (mode === 'development' || mode === 'dev') {
+      return config.API_BASE_URL_Development || 'https://api.cayoshibot.com/api'
+    } else if (mode === 'production') {
+      return config.API_BASE_URL_Production || 'https://api.cayoshibot.com/api'
+    }
+    return config.API_BASE_URL_Production || 'https://api.cayoshibot.com/api'
+  }
+  const [apiBase, setApiBase] = useState(getApiBaseUrl())
   //const [apiBase, setApiBase] = useState('http://localhost:5081/api')
   const [loadingKey, setLoadingKey] = useState(null)
   const [orders, setOrders] = useState([])

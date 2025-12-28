@@ -17,6 +17,8 @@
 
 <script type="module">
 
+import config from '../config.json';
+
 // ===============================================
 // CONFIG
 // ===============================================
@@ -63,7 +65,7 @@ function toCandle(raw) {
 }
 
 async function fetchKlines(params) {
-    const url = new URL("https://api.binance.com/api/v3/klines");
+    const url = new URL(config.API_BASE_URL_Binance || "https://api.binance.com/api/v3/klines");
     url.searchParams.set("symbol", SYMBOL);
     url.searchParams.set("interval", INTERVAL);
     url.searchParams.set("limit", "1000");
