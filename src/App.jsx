@@ -397,6 +397,9 @@ function App() {
   const [orderReportLoading, setOrderReportLoading] = useState(false)
   const [orderReportError, setOrderReportError] = useState(null)
   const [orderFilter, setOrderFilter] = useState(() => loadPrimitiveState('orderFilter', 'all')) // 'all', 'SOLD', 'WAITING_SELL'
+  const [ordersPage, setOrdersPage] = useState(1)
+  const [ordersPageSize, setOrdersPageSize] = useState(() => loadPrimitiveState('ordersPageSize', 100))
+  const [ordersTotal, setOrdersTotal] = useState(0)
   const [orderViewMode, setOrderViewMode] = useState(() => loadPrimitiveState('orderViewMode', 'card')) // 'card' or 'table'
   const [ordersSort, setOrdersSort] = useState({
     field: 'dateBuy',
@@ -875,14 +878,24 @@ function App() {
     }
   }
 
-  const fetchOrders = async (key = 'ordersAuto') => {
+  const fetchOrders = async (key = 'ordersAuto', page = ordersPage, pageSize = ordersPageSize, filter = orderFilter) => {
     setOrdersLoading(true)
     setOrdersError(null)
     try {
-      await runRequest(key, 'SQLite/GetOrders', {
+      // Map filter values: 'all' -> 'All', 'SOLD' -> 'SOLD', 'WAITING_SELL' -> 'WAITING_SELL'
+      const apiFilter = filter === 'all' ? 'All' : filter
+      
+      await runRequest(key, 'SQLite/GetOrdersByPage', {
+        method: 'POST',
+        payload: {
+          page: page,
+          pageSize: pageSize,
+          filter: apiFilter,
+        },
         onSuccess: (payload) => {
           const items = Array.isArray(payload?.data) ? payload.data : []
           setOrders(items)
+          setOrdersTotal(payload?.total || 0)
           setOrdersError(null)
         },
         onError: (err) => {
@@ -1209,7 +1222,7 @@ function App() {
   }
 
   useEffect(() => {
-    fetchOrders()
+    fetchOrders('ordersAuto', ordersPage, ordersPageSize, orderFilter)
     fetchOrderReport()
     fetchSettings()
     fetchBotStatus()
@@ -1476,7 +1489,7 @@ function App() {
           // If it's an Order Buy/Sell alert, refresh orders
           if (isOrderAlert) {
             console.log('Order Buy/Sell alert detected, refreshing orders...')
-            fetchOrders('ordersSignalRAlert')
+            fetchOrders('ordersSignalRAlert', ordersPage, ordersPageSize, orderFilter)
           }
 
           // Refresh unread count
@@ -1698,7 +1711,7 @@ function App() {
     await runRequest(`updateOrder-${orderModalData.id}`, 'SQLite/UpdateOrder', {
       payload: orderModalData,
       onSuccess: () => {
-        fetchOrders('ordersAfterUpdate')
+        fetchOrders('ordersAfterUpdate', ordersPage, ordersPageSize, orderFilter)
         closeOrderModal()
       },
     })
@@ -1710,7 +1723,7 @@ function App() {
     if (!confirmed) return
     await runRequest(`deleteOrder-${order.id}`, 'SQLite/DeleteOrder', {
       payload: { id: Number(order.id) },
-      onSuccess: () => fetchOrders('ordersAfterDelete'),
+      onSuccess: () => fetchOrders('ordersAfterDelete', ordersPage, ordersPageSize, orderFilter),
     })
   }
 
@@ -1761,7 +1774,7 @@ function App() {
         onSuccess: (data) => {
           alert('Sell Now executed successfully!')
           // Reload orders to see the updated order
-          fetchOrders()
+          fetchOrders('ordersAuto', ordersPage, ordersPageSize, orderFilter)
           closeSellModal()
         },
         onError: (err) => {
@@ -1834,7 +1847,7 @@ function App() {
         onSuccess: (data) => {
           alert('Buy Now executed successfully!')
           // Reload orders to see the new order
-          fetchOrders()
+          fetchOrders('ordersAuto', ordersPage, ordersPageSize, orderFilter)
           // Reset form
           setBuyNowForm((prev) => ({
             ...defaultBuyNowForm,
@@ -2150,7 +2163,7 @@ function App() {
         onSuccess: (data) => {
           alert('Trade executed successfully!')
           // Reload orders to see the new trade
-          fetchOrders()
+          fetchOrders('ordersAuto', ordersPage, ordersPageSize, orderFilter)
           // Reset form
           setTradeForm((prev) => ({
             ...defaultTradeForm,
@@ -4775,7 +4788,7 @@ function App() {
           <button 
             className="secondary ghost" 
             onClick={() => {
-              fetchOrders('ordersManual')
+              fetchOrders('ordersManual', ordersPage, ordersPageSize, orderFilter)
               fetchOrderReport()
             }} 
             disabled={ordersLoading || orderReportLoading}
@@ -4807,7 +4820,9 @@ function App() {
           className={`secondary ${orderFilter === 'all' ? '' : 'ghost'}`}
           onClick={() => {
             setOrderFilter('all')
+            setOrdersPage(1) // Reset to page 1 when filter changes
             sessionStorage.setItem('orderFilter', JSON.stringify('all'))
+            fetchOrders('ordersFilterChange', 1, ordersPageSize, 'all')
           }}
           style={{ fontSize: '0.875rem' }}
         >
@@ -4817,7 +4832,9 @@ function App() {
           className={`secondary ${orderFilter === 'SOLD' ? '' : 'ghost'}`}
           onClick={() => {
             setOrderFilter('SOLD')
+            setOrdersPage(1) // Reset to page 1 when filter changes
             sessionStorage.setItem('orderFilter', JSON.stringify('SOLD'))
+            fetchOrders('ordersFilterChange', 1, ordersPageSize, 'SOLD')
           }}
           style={{ fontSize: '0.875rem' }}
         >
@@ -4827,12 +4844,142 @@ function App() {
           className={`secondary ${orderFilter === 'WAITING_SELL' ? '' : 'ghost'}`}
           onClick={() => {
             setOrderFilter('WAITING_SELL')
+            setOrdersPage(1) // Reset to page 1 when filter changes
             sessionStorage.setItem('orderFilter', JSON.stringify('WAITING_SELL'))
+            fetchOrders('ordersFilterChange', 1, ordersPageSize, 'WAITING_SELL')
           }}
           style={{ fontSize: '0.875rem' }}
         >
-          WAITING_SELL
+          WAITING
         </button>
+      </div>
+
+      {/* Pagination Controls */}
+      <div style={{ 
+        display: 'flex', 
+        gap: '1rem', 
+        alignItems: 'center', 
+        padding: '1rem',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between'
+      }}>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ opacity: 0.7 }}>Total: {ordersTotal}</span>
+          
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <span style={{ opacity: 0.7, fontSize: '0.875rem' }}>Page Size:</span>
+            <select
+              value={ordersPageSize}
+              onChange={(e) => {
+                const newPageSize = Number(e.target.value)
+                setOrdersPageSize(newPageSize)
+                setOrdersPage(1) // Reset to page 1 when page size changes
+                sessionStorage.setItem('ordersPageSize', JSON.stringify(newPageSize))
+                fetchOrders('ordersPageSizeChange', 1, newPageSize, orderFilter)
+              }}
+              style={{
+                padding: '4px 8px',
+                background: 'rgba(255, 255, 255, 0.1)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: '4px',
+                color: '#fff',
+                fontSize: '0.875rem',
+                cursor: 'pointer'
+              }}
+            >
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Page Numbers */}
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          {(() => {
+            const totalPages = Math.ceil(ordersTotal / ordersPageSize)
+            const currentPage = ordersPage
+            const pages = []
+            
+            if (totalPages === 0) {
+              return <span style={{ opacity: 0.7 }}>No pages</span>
+            }
+            
+            // Calculate page range to show (max 10 pages)
+            let startPage = Math.max(1, currentPage - 4)
+            let endPage = Math.min(totalPages, currentPage + 5)
+            
+            // Adjust if near the start
+            if (currentPage <= 5) {
+              endPage = Math.min(10, totalPages)
+            }
+            // Adjust if near the end
+            if (currentPage > totalPages - 5) {
+              startPage = Math.max(1, totalPages - 9)
+            }
+            
+            // First page button
+            if (startPage > 1) {
+              pages.push(
+                <button
+                  key="first"
+                  className="secondary small"
+                  onClick={() => {
+                    setOrdersPage(1)
+                    fetchOrders('ordersPageChange', 1, ordersPageSize, orderFilter)
+                  }}
+                  style={{ fontSize: '0.875rem', padding: '4px 8px' }}
+                >
+                  1
+                </button>
+              )
+              if (startPage > 2) {
+                pages.push(<span key="ellipsis1" style={{ opacity: 0.5 }}>...</span>)
+              }
+            }
+            
+            // Page number buttons
+            for (let i = startPage; i <= endPage; i++) {
+              pages.push(
+                <button
+                  key={i}
+                  className={`secondary small ${i === currentPage ? '' : 'ghost'}`}
+                  onClick={() => {
+                    setOrdersPage(i)
+                    fetchOrders('ordersPageChange', i, ordersPageSize, orderFilter)
+                  }}
+                  style={{ fontSize: '0.875rem', padding: '4px 8px' }}
+                >
+                  {i}
+                </button>
+              )
+            }
+            
+            // Last page button
+            if (endPage < totalPages) {
+              if (endPage < totalPages - 1) {
+                pages.push(<span key="ellipsis2" style={{ opacity: 0.5 }}>...</span>)
+              }
+              pages.push(
+                <button
+                  key="last"
+                  className="secondary small"
+                  onClick={() => {
+                    setOrdersPage(totalPages)
+                    fetchOrders('ordersPageChange', totalPages, ordersPageSize, orderFilter)
+                  }}
+                  style={{ fontSize: '0.875rem', padding: '4px 8px' }}
+                >
+                  {totalPages}
+                </button>
+              )
+            }
+            
+            return pages
+          })()}
+        </div>
       </div>
 
       <div className="order-list">
