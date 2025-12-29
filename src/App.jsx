@@ -377,6 +377,7 @@ function App() {
   const [loginError, setLoginError] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginForm, setLoginForm] = useState({ username: '', password: '' })
+  const [showPassword, setShowPassword] = useState(false)
 
   const [activeTab, setActiveTab] = useState(() => loadPrimitiveState('activeTab', 'orders'))
   //const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
@@ -623,12 +624,29 @@ function App() {
     priceChartEngineRef.current.interval = priceChartInterval || '1m'
   }, [priceChartInterval])
 
-  const headers = useMemo(
-    () => ({
+  // Check and refresh token on app load if authenticated
+  useEffect(() => {
+    if (isAuthenticated && isTokenExpired()) {
+      refreshToken().catch((err) => {
+        console.error('Failed to refresh token on load:', err)
+        // Token refresh failed, user will need to login again
+      })
+    }
+  }, []) // Only run on mount
+
+  // Get headers with current token
+  const getHeaders = () => {
+    const token = getCookie('authToken')
+    const baseHeaders = {
       'Content-Type': 'application/json',
-    }),
-    []
-  )
+    }
+    if (token) {
+      baseHeaders['Authorization'] = `Bearer ${token}`
+    }
+    return baseHeaders
+  }
+
+  const headers = useMemo(() => getHeaders(), [isAuthenticated])
 
   const usdtCoinData = useMemo(
     () => (allCoinsData?.coins || []).find((coin) => (coin?.coin || '').toUpperCase() === 'USDT') || null,
@@ -652,6 +670,65 @@ function App() {
     return Number(xrpCoinData.valueInUSDT || 0) / amount
   }, [xrpCoinData, selectedSetting?.buyAmountUSD])
 
+  // Token refresh function
+  const refreshToken = async () => {
+    const refreshTokenValue = getCookie('refreshToken')
+    if (!refreshTokenValue) {
+      throw new Error('No refresh token available')
+    }
+
+    try {
+      const url = buildUrl(apiBase, 'Login/RefreshToken')
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ RefreshToken: refreshTokenValue }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'Token refresh failed')
+      }
+
+      // Update tokens in cookies
+      setCookie('authToken', data.token, 7)
+      setCookie('refreshToken', data.refreshToken, 7)
+      if (data.expireAt) {
+        setCookie('tokenExpireAt', data.expireAt, 7)
+      }
+
+      return data.token
+    } catch (err) {
+      console.error('Token refresh error:', err)
+      // If refresh fails, clear auth and redirect to login
+      deleteCookie('authToken')
+      deleteCookie('refreshToken')
+      deleteCookie('tokenExpireAt')
+      setIsAuthenticated(false)
+      throw err
+    }
+  }
+
+  // Check if token is expired
+  const isTokenExpired = () => {
+    const expireAt = getCookie('tokenExpireAt')
+    if (!expireAt) return true
+
+    try {
+      const expireDate = new Date(expireAt)
+      const now = new Date()
+      // Add 5 minute buffer before actual expiration
+      const bufferTime = 5 * 60 * 1000 // 5 minutes in milliseconds
+      return now.getTime() >= (expireDate.getTime() - bufferTime)
+    } catch (err) {
+      console.error('Error checking token expiration:', err)
+      return true
+    }
+  }
+
   // Login handler
   const handleLogin = async (e) => {
     e?.preventDefault()
@@ -659,18 +736,39 @@ function App() {
     setLoginLoading(true)
 
     try {
-      // Simple validation - username: cayoshi, password: c4544142
-      if (loginForm.username === 'cayoshi' && loginForm.password === 'c4544142') {
-        // Generate a simple token (in production, this should come from API)
-        const token = btoa(`${loginForm.username}:${Date.now()}`)
-        setCookie('authToken', token, 7) // Save for 7 days
-        setIsAuthenticated(true)
-        setLoginError('')
-      } else {
-        setLoginError('Invalid username or password')
+      const url = buildUrl(apiBase, 'Login/Login')
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          Username: loginForm.username,
+          Password: loginForm.password,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Login failed')
       }
+
+      // Store tokens in cookies
+      if (data.token) {
+        setCookie('authToken', data.token, 7)
+      }
+      if (data.refreshToken) {
+        setCookie('refreshToken', data.refreshToken, 7)
+      }
+      if (data.expireAt) {
+        setCookie('tokenExpireAt', data.expireAt, 7)
+      }
+
+      setIsAuthenticated(true)
+      setLoginError('')
     } catch (err) {
-      setLoginError('Login failed. Please try again.')
+      setLoginError(err.message || 'Login failed. Please try again.')
       console.error('Login error:', err)
     } finally {
       setLoginLoading(false)
@@ -683,11 +781,34 @@ function App() {
   }
 
   // Confirm logout - actually perform logout
-  const confirmLogout = () => {
-    deleteCookie('authToken')
-    setIsAuthenticated(false)
-    setLoginForm({ username: 'cayoshi', password: 'c4544142' })
-    setIsLogoutConfirmOpen(false)
+  const confirmLogout = async () => {
+    const refreshTokenValue = getCookie('refreshToken')
+    
+    try {
+      if (refreshTokenValue) {
+        const url = buildUrl(apiBase, 'Login/LogoutDevice')
+        await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            RefreshToken: refreshTokenValue,
+          }),
+        })
+      }
+    } catch (err) {
+      console.error('Logout API error:', err)
+      // Continue with logout even if API call fails
+    } finally {
+      // Clear all auth cookies
+      deleteCookie('authToken')
+      deleteCookie('refreshToken')
+      deleteCookie('tokenExpireAt')
+      setIsAuthenticated(false)
+      setLoginForm({ username: '', password: '' })
+      setIsLogoutConfirmOpen(false)
+    }
   }
 
   // Cancel logout
@@ -696,14 +817,76 @@ function App() {
   }
 
   const runRequest = async (key, endpoint, { method = 'POST', payload, onSuccess, onError } = {}) => {
+    // Check and refresh token if needed before making request
+    if (isAuthenticated && isTokenExpired()) {
+      try {
+        await refreshToken()
+      } catch (err) {
+        // If refresh fails, the refreshToken function already handles logout
+        onError?.(err)
+        return
+      }
+    }
+
     const url = buildUrl(apiBase, endpoint)
     setLoadingKey(key)
     try {
+      // Get fresh headers with updated token
+      const token = getCookie('authToken')
+      const requestHeaders = {
+        'Content-Type': 'application/json',
+      }
+      if (token) {
+        requestHeaders['Authorization'] = `Bearer ${token}`
+      }
+
       const response = await fetch(url, {
         method,
-        headers: method === 'GET' ? undefined : headers,
+        headers: method === 'GET' ? undefined : requestHeaders,
         body: method === 'GET' ? undefined : payload ? JSON.stringify(payload) : null,
       })
+
+      // If 401, try to refresh token once and retry
+      if (response.status === 401 && isAuthenticated) {
+        try {
+          await refreshToken()
+          // Retry with new token
+          const newToken = getCookie('authToken')
+          const retryHeaders = {
+            'Content-Type': 'application/json',
+          }
+          if (newToken) {
+            retryHeaders['Authorization'] = `Bearer ${newToken}`
+          }
+          const retryResponse = await fetch(url, {
+            method,
+            headers: method === 'GET' ? undefined : retryHeaders,
+            body: method === 'GET' ? undefined : payload ? JSON.stringify(payload) : null,
+          })
+          const contentType = retryResponse.headers.get('content-type') || ''
+          const data = contentType.includes('application/json')
+            ? await retryResponse.json()
+            : await retryResponse.text()
+
+          if (!retryResponse.ok) {
+            throw {
+              status: retryResponse.status,
+              endpoint,
+              data,
+            }
+          }
+
+          onSuccess?.(data, { key, status: retryResponse.status })
+          return data
+        } catch (refreshErr) {
+          throw {
+            status: 401,
+            endpoint,
+            data: { message: 'Authentication failed' },
+          }
+        }
+      }
+
       const contentType = response.headers.get('content-type') || ''
       const data = contentType.includes('application/json')
         ? await response.json()
@@ -1766,11 +1949,28 @@ function App() {
   }
 
   const exportBackup = async () => {
+    // Check and refresh token if needed
+    if (isAuthenticated && isTokenExpired()) {
+      try {
+        await refreshToken()
+      } catch (err) {
+        alert('Session expired. Please login again.')
+        return
+      }
+    }
+
     setBackupLoading(true)
     try {
+      const token = getCookie('authToken')
+      const requestHeaders = {}
+      if (token) {
+        requestHeaders['Authorization'] = `Bearer ${token}`
+      }
+
       const url = buildUrl(apiBase, 'SQLite/BackupExport')
       const response = await fetch(url, {
         method: 'GET',
+        headers: requestHeaders,
       })
 
       if (!response.ok) {
@@ -1838,8 +2038,25 @@ function App() {
 
       formData.append('ReplaceExisting', backupReplaceExisting)
 
+      // Check and refresh token if needed
+      if (isAuthenticated && isTokenExpired()) {
+        try {
+          await refreshToken()
+        } catch (err) {
+          alert('Session expired. Please login again.')
+          return
+        }
+      }
+
+      const token = getCookie('authToken')
+      const requestHeaders = {}
+      if (token) {
+        requestHeaders['Authorization'] = `Bearer ${token}`
+      }
+
       const response = await fetch(url, {
         method: 'POST',
+        headers: requestHeaders,
         body: formData,
       })
 
@@ -5798,14 +6015,52 @@ function App() {
               
               <label>
                 Password
-                <input
-                  type="password"
-                  value={loginForm.password}
-                  onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
-                  placeholder="Enter password"
-                  required
-                  style={{ marginTop: '8px' }}
-                />
+                <div style={{ position: 'relative', marginTop: '8px' }}>
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={loginForm.password}
+                    onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
+                    placeholder="Enter password"
+                    required
+                    style={{ width: '100%', paddingRight: '45px', boxSizing: 'border-box' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    style={{
+                      position: 'absolute',
+                      right: '8px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '4px 8px',
+                      color: '#00d1ff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'opacity 0.2s',
+                      width: '24px',
+                      height: '24px',
+                    }}
+                    onMouseEnter={(e) => e.target.style.opacity = '0.7'}
+                    onMouseLeave={(e) => e.target.style.opacity = '1'}
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                      </svg>
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                    )}
+                  </button>
+                </div>
               </label>
               
               {loginError && (
