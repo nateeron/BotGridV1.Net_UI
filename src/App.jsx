@@ -6,6 +6,7 @@ import iconUSDT from './icon/XTVCUSDT--big.svg'
 import iconXRP from './icon/XTVCXRP--big.svg'
 import alertSound from './sound/sound-Buy-Sell.mp3'
 import config from '../config.json'
+import Login from './components/Login'
 
 const tabs = [
   { key: 'orders', label: 'Orders', icon: '📦' },
@@ -374,10 +375,6 @@ function App() {
     const token = getCookie('authToken')
     return !!token
   })
-  const [loginError, setLoginError] = useState('')
-  const [loginLoading, setLoginLoading] = useState(false)
-  const [loginForm, setLoginForm] = useState({ username: '', password: '' })
-  const [showPassword, setShowPassword] = useState(false)
 
   const [activeTab, setActiveTab] = useState(() => loadPrimitiveState('activeTab', 'orders'))
   //const [apiBase, setApiBase] = useState('http://139.180.128.104:5081/api')
@@ -396,6 +393,9 @@ function App() {
   const [orders, setOrders] = useState([])
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError] = useState(null)
+  const [orderReport, setOrderReport] = useState(null)
+  const [orderReportLoading, setOrderReportLoading] = useState(false)
+  const [orderReportError, setOrderReportError] = useState(null)
   const [orderFilter, setOrderFilter] = useState(() => loadPrimitiveState('orderFilter', 'all')) // 'all', 'SOLD', 'WAITING_SELL'
   const [orderViewMode, setOrderViewMode] = useState(() => loadPrimitiveState('orderViewMode', 'card')) // 'card' or 'table'
   const [ordersSort, setOrdersSort] = useState({
@@ -634,6 +634,13 @@ function App() {
     }
   }, []) // Only run on mount
 
+  // Fetch order report on mount and when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchOrderReport()
+    }
+  }, [isAuthenticated])
+
   // Get headers with current token
   const getHeaders = () => {
     const token = getCookie('authToken')
@@ -729,50 +736,9 @@ function App() {
     }
   }
 
-  // Login handler
-  const handleLogin = async (e) => {
-    e?.preventDefault()
-    setLoginError('')
-    setLoginLoading(true)
-
-    try {
-      const url = buildUrl(apiBase, 'Login/Login')
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          Username: loginForm.username,
-          Password: loginForm.password,
-        }),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Login failed')
-      }
-
-      // Store tokens in cookies
-      if (data.token) {
-        setCookie('authToken', data.token, 7)
-      }
-      if (data.refreshToken) {
-        setCookie('refreshToken', data.refreshToken, 7)
-      }
-      if (data.expireAt) {
-        setCookie('tokenExpireAt', data.expireAt, 7)
-      }
-
-      setIsAuthenticated(true)
-      setLoginError('')
-    } catch (err) {
-      setLoginError(err.message || 'Login failed. Please try again.')
-      console.error('Login error:', err)
-    } finally {
-      setLoginLoading(false)
-    }
+  // Login success handler
+  const handleLoginSuccess = () => {
+    setIsAuthenticated(true)
   }
 
   // Logout handler - show confirmation dialog
@@ -925,6 +891,30 @@ function App() {
       })
     } finally {
       setOrdersLoading(false)
+    }
+  }
+
+  const fetchOrderReport = async () => {
+    setOrderReportLoading(true)
+    setOrderReportError(null)
+    try {
+      await runRequest('orderReport', 'Report/GetOrderReport', {
+        method: 'POST',
+        onSuccess: (payload) => {
+          if (payload?.success && payload?.data) {
+            setOrderReport(payload.data)
+            setOrderReportError(null)
+          } else {
+            throw new Error(payload?.message || 'Failed to fetch order report')
+          }
+        },
+        onError: (err) => {
+          setOrderReportError(err)
+          console.error('Order report error:', err)
+        },
+      })
+    } finally {
+      setOrderReportLoading(false)
     }
   }
 
@@ -1220,6 +1210,7 @@ function App() {
 
   useEffect(() => {
     fetchOrders()
+    fetchOrderReport()
     fetchSettings()
     fetchBotStatus()
     fetchUnreadCount()
@@ -4696,21 +4687,41 @@ function App() {
   }, [orders, orderFilter, orderViewMode, ordersSort])
 
   const orderCounts = useMemo(() => {
+    // Use API data if available, otherwise fallback to orders calculation
+    if (orderReport) {
+      return {
+        all: orderReport.totalOrderAll || 0,
+        sold: orderReport.orderSold || 0,
+        waiting: orderReport.orderWaiting || 0,
+      }
+    }
+    // Fallback to orders calculation
     const all = orders.length
     const sold = orders.filter((o) => o?.status === 'SOLD').length
     const waiting = orders.filter((o) => o?.status === 'WAITING_SELL').length
     return { all, sold, waiting }
-  }, [orders])
+  }, [orderReport, orders])
 
   const orderTotals = useMemo(() => {
+    // Calculate waitingCoinQtyTotal from orders (API doesn't provide this)
     const waitingOrders = orders.filter((o) => o?.status === 'WAITING_SELL')
-    const soldOrders = orders.filter((o) => o?.status === 'SOLD')
-    
     const waitingCoinQtyTotal = waitingOrders.reduce((sum, order) => {
       const qty = Number(order?.coinQuantity ?? order?.quantity ?? 0)
       return sum + qty
     }, 0)
     
+    // Use API data for soldProfitLoss if available, otherwise fallback to orders calculation
+    if (orderReport?.soldProfitLoss) {
+      return {
+        waitingCoinQtyTotal,
+        soldProfitLossTotal: orderReport.soldProfitLoss.usdt || 0,
+        soldProfitLossTHB: orderReport.soldProfitLoss.thb || 0,
+        exchangeRate: orderReport.soldProfitLoss.exchangeRate || 0,
+      }
+    }
+    
+    // Fallback to orders calculation for soldProfitLoss
+    const soldOrders = orders.filter((o) => o?.status === 'SOLD')
     const soldProfitLossTotal = soldOrders.reduce((sum, order) => {
       const profit = Number(order?.profitLoss ?? 0)
       return sum + profit
@@ -4720,7 +4731,7 @@ function App() {
       waitingCoinQtyTotal,
       soldProfitLossTotal,
     }
-  }, [orders])
+  }, [orderReport, orders])
 
   // Get bot status for Orders tab (same logic as Tab Bot)
   const ordersBotStatus = useMemo(() => {
@@ -4761,8 +4772,15 @@ function App() {
               📊 Table
             </button>
           </div>
-          <button className="secondary ghost" onClick={() => fetchOrders('ordersManual')} disabled={ordersLoading}>
-            {ordersLoading ? 'Loading...' : 'Refresh'}
+          <button 
+            className="secondary ghost" 
+            onClick={() => {
+              fetchOrders('ordersManual')
+              fetchOrderReport()
+            }} 
+            disabled={ordersLoading || orderReportLoading}
+          >
+            {ordersLoading || orderReportLoading ? 'Loading...' : 'Refresh'}
           </button>
           <button
             className="primary"
@@ -5991,97 +6009,7 @@ function App() {
 
   // Render Login Page
   if (!isAuthenticated) {
-    return (
-      <div className="app" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
-        <div className="card" style={{ maxWidth: '400px', width: '100%', padding: '32px' }}>
-          <header style={{ marginBottom: '24px', textAlign: 'center' }}>
-            <h3>Login</h3>
-            <p className="eyebrow" style={{ marginTop: '8px' }}>Please enter your credentials</p>
-          </header>
-          
-          <form onSubmit={handleLogin}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <label>
-                Username
-                <input
-                  type="text"
-                  value={loginForm.username}
-                  onChange={(e) => setLoginForm((prev) => ({ ...prev, username: e.target.value }))}
-                  placeholder="Enter username"
-                  required
-                  style={{ marginTop: '8px' }}
-                />
-              </label>
-              
-              <label>
-                Password
-                <div style={{ position: 'relative', marginTop: '8px' }}>
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={loginForm.password}
-                    onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
-                    placeholder="Enter password"
-                    required
-                    style={{ width: '100%', paddingRight: '45px', boxSizing: 'border-box' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    style={{
-                      position: 'absolute',
-                      right: '8px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      background: 'transparent',
-                      border: 'none',
-                      cursor: 'pointer',
-                      padding: '4px 8px',
-                      color: '#00d1ff',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      transition: 'opacity 0.2s',
-                      width: '24px',
-                      height: '24px',
-                    }}
-                    onMouseEnter={(e) => e.target.style.opacity = '0.7'}
-                    onMouseLeave={(e) => e.target.style.opacity = '1'}
-                    title={showPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showPassword ? (
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                        <line x1="1" y1="1" x2="23" y2="23"></line>
-                      </svg>
-                    ) : (
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                        <circle cx="12" cy="12" r="3"></circle>
-                      </svg>
-                    )}
-                  </button>
-                </div>
-              </label>
-              
-              {loginError && (
-                <div className="state-block error" style={{ marginTop: '8px' }}>
-                  {loginError}
-                </div>
-              )}
-              
-              <button 
-                type="submit" 
-                className="primary" 
-                disabled={loginLoading}
-                style={{ marginTop: '8px' }}
-              >
-                {loginLoading ? 'Logging in...' : 'Login'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    )
+    return <Login apiBase={apiBase} onLoginSuccess={handleLoginSuccess} />
   }
 
   return (
@@ -6146,11 +6074,25 @@ function App() {
                 {orderTotals.waitingCoinQtyTotal.toFixed(4)}
               </span>
             </div>
+            {orderTotals.exchangeRate && (
+              <div className="top-bar-item">
+                <span className="top-bar-label">Exchange Rate:</span>
+                <span className="top-bar-value">
+                  {orderTotals.exchangeRate.toFixed(2)}
+                </span>
+              </div>
+            )}
             <div className="top-bar-item">
               <span className="top-bar-label">Sold P/L:</span>
               <span className={`top-bar-value ${orderTotals.soldProfitLossTotal >= 0 ? 'positive' : 'negative'}`}>
                 {orderTotals.soldProfitLossTotal >= 0 ? '+' : ''}
-                {orderTotals.soldProfitLossTotal.toFixed(4)}
+                {orderTotals.soldProfitLossTotal.toFixed(4)} USDT
+                {orderTotals.soldProfitLossTHB !== undefined && (
+                  <span style={{ marginLeft: '8px', color: 'inherit' }}>
+                    ({orderTotals.soldProfitLossTHB >= 0 ? '+' : ''}
+                    {orderTotals.soldProfitLossTHB.toFixed(2)} THB)
+                  </span>
+                )}
               </span>
             </div>
             {portfolioValueFromCoins !== null && (
