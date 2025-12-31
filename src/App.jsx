@@ -147,6 +147,16 @@ const trimZeros = (value, decimals = 8) => {
   return fixed.replace(/\.?0+$/, '')
 }
 
+const formatNumber = (value, decimals = 2) => {
+  if (value === null || value === undefined || value === '') return '0.00'
+  const num = Number(value)
+  if (Number.isNaN(num)) return '0.00'
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  }).format(num)
+}
+
 const defaultTradeForm = {
   ConfigId: 1,
   Symbol: 'BTCUSDT',
@@ -209,7 +219,6 @@ const loadLightweightChartsModule = async () => {
     if (window.LightweightCharts) {
       return window.LightweightCharts
     }
-    console.warn('CDN load failed, falling back to dynamic import')
   }
 
   if (!lightweightChartsLibPromise) {
@@ -224,7 +233,6 @@ const loadLightweightChartsModule = async () => {
         if (mod?.createChart) return mod
         if (mod?.default?.createChart) return mod.default
       } catch (err) {
-        console.warn('Dynamic import of lightweight-charts failed:', err)
       }
       throw new Error('lightweight-charts is not available in this environment')
     })()
@@ -631,11 +639,33 @@ function App() {
   useEffect(() => {
     if (isAuthenticated && isTokenExpired()) {
       refreshToken().catch((err) => {
-        console.error('Failed to refresh token on load:', err)
         // Token refresh failed, user will need to login again
       })
     }
   }, []) // Only run on mount
+
+  // Auto check and refresh token periodically
+  useEffect(() => {
+    if (!isAuthenticated) return
+
+    const checkAndRefreshToken = async () => {
+      if (isTokenExpired()) {
+        try {
+          await refreshToken()
+        } catch (err) {
+          // Token refresh failed, user will need to login again
+        }
+      }
+    }
+
+    // Check every 1 minute
+    const interval = setInterval(checkAndRefreshToken, 60 * 1000)
+
+    // Also check immediately
+    checkAndRefreshToken()
+
+    return () => clearInterval(interval)
+  }, [isAuthenticated])
 
   // Fetch order report on mount and when authenticated
   useEffect(() => {
@@ -712,7 +742,6 @@ function App() {
 
       return data.token
     } catch (err) {
-      console.error('Token refresh error:', err)
       // If refresh fails, clear auth and redirect to login
       deleteCookie('authToken')
       deleteCookie('refreshToken')
@@ -734,7 +763,6 @@ function App() {
       const bufferTime = 5 * 60 * 1000 // 5 minutes in milliseconds
       return now.getTime() >= (expireDate.getTime() - bufferTime)
     } catch (err) {
-      console.error('Error checking token expiration:', err)
       return true
     }
   }
@@ -767,7 +795,6 @@ function App() {
         })
       }
     } catch (err) {
-      console.error('Logout API error:', err)
       // Continue with logout even if API call fails
     } finally {
       // Clear all auth cookies
@@ -776,7 +803,6 @@ function App() {
       deleteCookie('tokenExpireAt')
       setIsAuthenticated(false)
       setLoginForm({ username: '', password: '' })
-      setIsLogoutConfirmOpen(false)
     }
   }
 
@@ -923,7 +949,6 @@ function App() {
         },
         onError: (err) => {
           setOrderReportError(err)
-          console.error('Order report error:', err)
         },
       })
     } finally {
@@ -1086,7 +1111,6 @@ function App() {
         },
       })
     } catch (err) {
-      console.error('Error fetching unread count:', err)
     }
   }
 
@@ -1383,7 +1407,6 @@ function App() {
         // Listen for order updates before starting connection
         connection.on('OrderUpdated', (data) => {
           if (!isMounted) return
-          console.log('Order updated:', data)
           // Reload/update UI
           fetchOrders('ordersSignalR')
         })
@@ -1396,13 +1419,11 @@ function App() {
           return
         }
 
-        console.log('SignalR Connected')
         
         // Join group for config ID "1" (can be made dynamic based on selectedSettingId)
         await connection.invoke('JoinOrderGroup', '1')
       } catch (err) {
         if (isMounted) {
-          console.error('SignalR Connection Error:', err)
         }
       }
     }
@@ -1415,7 +1436,6 @@ function App() {
       if (connection) {
         connection.stop().catch((err) => {
           // Ignore errors during cleanup
-          console.debug('Error stopping SignalR connection:', err)
         })
       }
     }
@@ -1427,12 +1447,10 @@ function App() {
       if (alertSoundRef.current) {
         alertSoundRef.current.currentTime = 0 // Reset to start
         alertSoundRef.current.play().catch((err) => {
-          console.warn('Could not play alert sound:', err)
           // User interaction may be required for autoplay
         })
       }
     } catch (err) {
-      console.warn('Error playing alert sound:', err)
     }
   }, [])
 
@@ -1458,7 +1476,6 @@ function App() {
         alertConnection.on('NewAlert', (alert) => {
           if (!isMounted) return
           
-          console.log('New alert:', alert)
           // Add alert to state with unique ID and timestamp
           const newAlert = {
             id: Date.now() + Math.random(),
@@ -1488,7 +1505,6 @@ function App() {
 
           // If it's an Order Buy/Sell alert, refresh orders
           if (isOrderAlert) {
-            console.log('Order Buy/Sell alert detected, refreshing orders...')
             fetchOrders('ordersSignalRAlert', ordersPage, ordersPageSize, orderFilter)
           }
 
@@ -1512,13 +1528,11 @@ function App() {
           return
         }
 
-        console.log('SignalR Alerts Connected')
         
         // Join all alerts group
         await alertConnection.invoke('JoinAllAlerts')
       } catch (err) {
         if (isMounted) {
-          console.error('SignalR Alerts Connection Error:', err)
         }
       }
     }
@@ -1536,7 +1550,6 @@ function App() {
       if (alertConnection) {
         alertConnection.stop().catch((err) => {
           // Ignore errors during cleanup
-          console.debug('Error stopping SignalR alerts connection:', err)
         })
       }
     }
@@ -1782,7 +1795,6 @@ function App() {
         },
       })
     } catch (err) {
-      console.error('Sell Now error:', err)
       alert(`Sell Now failed: ${err.message}`)
     } finally {
       setSellNowLoading(false)
@@ -1859,7 +1871,6 @@ function App() {
         },
       })
     } catch (err) {
-      console.error('Buy Now error:', err)
       alert(`Buy Now failed: ${err.message}`)
     } finally {
       setBuyNowLoading(false)
@@ -2002,7 +2013,6 @@ function App() {
       document.body.removeChild(link)
       window.URL.revokeObjectURL(downloadUrl)
     } catch (err) {
-      console.error('Export error:', err)
       alert(`Export failed: ${err.message}`)
     } finally {
       setBackupLoading(false)
@@ -2080,7 +2090,6 @@ function App() {
       setBackupFile(null)
       setBackupJsonText('')
     } catch (err) {
-      console.error('Import error:', err)
       alert(`Import failed: ${err.message}`)
     } finally {
       setBackupLoading(false)
@@ -2175,7 +2184,6 @@ function App() {
         },
       })
     } catch (err) {
-      console.error('Trade error:', err)
       alert(`Trade failed: ${err.message}`)
     } finally {
       setTradeLoading(false)
@@ -2318,6 +2326,7 @@ function App() {
       'SOL': iconSOL,
       'USDT': iconUSDT,
       'XRP': iconXRP,
+      'BNB': 'https://assets.coingecko.com/coins/images/825/small/bnb-icon2_2x.png',
     }
     
     return iconMap[baseSymbol] || iconMap[symbolUpper] || null
@@ -2440,7 +2449,6 @@ function App() {
       }
       engine.nextEntryPriceLine = newPriceLine
     } catch (err) {
-      console.error('[NextEntry] Error updating line:', err)
     }
   }, [tradeLineSettings, calculateNextEntry])
 
@@ -2483,7 +2491,6 @@ function App() {
         applySeriesData(candles)
         setPriceChartData(candles)
       } catch (err) {
-        console.error('Error fetching candles:', err)
         setPriceChartError(err)
         if (!priceChartEngineRef.current.allData.length) {
           const now = Math.floor(Date.now() / 1000)
@@ -2543,7 +2550,6 @@ function App() {
           setPriceChartData([...engine.allData])
         }
       } catch (err) {
-        console.error('Error loading more candles:', err)
       } finally {
         engine.loadingMore = false
       }
@@ -2557,7 +2563,6 @@ function App() {
       try {
         engine.ws.close()
       } catch (err) {
-        console.debug('Error closing price WS:', err)
       }
       engine.ws = null
     }
@@ -2603,11 +2608,9 @@ function App() {
           updateSeriesPoint(candle)
           setPriceChartData([...engine.allData])
         } catch (err) {
-          console.error('WS candle parse error:', err)
         }
       }
       ws.onerror = (err) => {
-        console.error('Binance WS error:', err)
       }
     },
     [updateSeriesPoint]
@@ -3271,21 +3274,16 @@ function App() {
               shape: 'circle',
               text: `Last Action ${lastActionPrice.toFixed(4)}`,
             })
-            console.log('[Last Action] Marker added to markers array')
           }
         } catch (err) {
-          console.error('[Last Action] Error creating line:', err)
         }
       } else {
-        console.warn('[Last Action] Invalid price, cannot create line:', lastActionPrice)
       }
     } else {
       // Debug: log เพื่อตรวจสอบว่าทำไมไม่แสดง
       if (buttons.toggleLastAction === false) {
-        console.warn('[Last Action] Disabled: toggleLastAction is false - click the "Last Action" button in toolbar')
       }
       if (lines.lastAction?.visible === false) {
-        console.warn('[Last Action] Disabled: visible is false - enable in Settings Modal')
       }
     }
 
@@ -3421,10 +3419,6 @@ function App() {
         if (!ensureSeriesSupport()) {
           priceChartInitRetryRef.current += 1
           if (priceChartInitRetryRef.current <= 5) {
-            console.warn(
-              '[PriceChart] Chart API not ready, retrying...',
-              priceChartInitRetryRef.current
-            )
             try {
               chart.remove()
             } catch {
@@ -3437,7 +3431,6 @@ function App() {
             return
           }
           setPriceChartError(new Error('Chart API not ready'))
-          console.error('Lightweight-charts chart object missing series methods after retries:', chart)
           return
         }
         priceChartInitRetryRef.current = 0
@@ -3519,7 +3512,6 @@ function App() {
             : null
           if (!fallbackLineSeries) {
             setPriceChartError(new Error('No compatible series method found on chart instance'))
-            console.error('Lightweight-charts chart object has no add*Series methods:', chart)
             return
           }
           primarySeries = fallbackLineSeries
@@ -3553,7 +3545,6 @@ function App() {
             })
           }
         } catch (err) {
-          console.warn('Failed to apply price scale precision:', err)
         }
 
         await loadInitialCandles(resolvedChartSymbol)
@@ -3583,7 +3574,6 @@ function App() {
         }
         window.addEventListener('resize', resizeHandler)
       } catch (err) {
-        console.error('Error initializing chart:', err)
         setPriceChartError(err)
       }
     }
@@ -3671,7 +3661,6 @@ function App() {
         })
       }
     } catch (err) {
-      console.warn('Failed to update price scale precision:', err)
     }
   }, [activeTab, resolvedChartSymbol, viewMode, getPriceScalePrecision])
 
@@ -3702,7 +3691,6 @@ function App() {
       const chartHeight = calculateHeight()
       priceChartInstanceRef.current.applyOptions({ height: chartHeight })
     } catch (err) {
-      console.warn('Failed to update chart height:', err)
     }
   }, [priceChartHeight, isPriceChartFullscreen])
 
@@ -3721,7 +3709,6 @@ function App() {
           height: chartHeight 
         })
       } catch (err) {
-        console.warn('Failed to update chart size on resize:', err)
       }
     }
 
@@ -3797,7 +3784,6 @@ function App() {
         autoScale: false,
       })
     } catch (err) {
-      console.warn('Failed to zoom in price scale:', err)
     }
   }, [priceScaleMargins])
 
@@ -3817,7 +3803,6 @@ function App() {
         autoScale: false,
       })
     } catch (err) {
-      console.warn('Failed to zoom out price scale:', err)
     }
   }, [priceScaleMargins])
 
@@ -3834,7 +3819,6 @@ function App() {
         autoScale: true,
       })
     } catch (err) {
-      console.warn('Failed to reset price scale:', err)
     }
   }, [])
 
@@ -4574,6 +4558,9 @@ function App() {
           </button>
           <button className="danger ghost" onClick={clearLogs} title="Clear all logs">
             🗑 Clear Logs
+          </button>
+          <button className="secondary ghost" type="button" onClick={() => setShowAlertLogs(false)}>
+            Close
           </button>
         </div>
       </header>
@@ -5658,7 +5645,27 @@ function App() {
           <div className="report-summary">
             <div className="report-item highlight">
               <span className="report-label">Portfolio Value</span>
-              <span className="report-value">{Number(spotReport.portfolioValue || 0).toFixed(4)}</span>
+              <span className="report-value" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {getCoinIcon('USDT') && (
+                  <img 
+                    src={getCoinIcon('USDT')} 
+                    alt="USDT"
+                    style={{ 
+                      width: '20px',
+                      height: '20px',
+                      borderRadius: '50%',
+                      objectFit: 'cover'
+                    }}
+                  />
+                )}
+                {formatNumber(spotReport.portfolioValue || 0, 4)}
+              </span>
+            </div>
+            <div className="report-item highlight">
+              <span className="report-label">Convert Price THB</span>
+              <span className="report-value">
+                {formatNumber((Number(spotReport.portfolioValue || 0)) * ((orderTotals && orderTotals.exchangeRate) || 36), 2)} THB
+              </span>
             </div>
             <div className="report-item">
               <span className="report-label">Orders Success</span>
@@ -5994,7 +6001,14 @@ function App() {
           <div className="coins-summary">
             <div className="summary-item">
               <span className="summary-label">Total Value USD</span>
-              <span className="summary-value">{Number(allCoinsData.totalValueUSD || 0).toFixed(4)}</span>
+              <span className="summary-value">
+                {formatNumber(allCoinsData.totalValueUSD || 0, 4)} USDT
+                {orderTotals?.exchangeRate && (
+                  <span style={{ marginLeft: '8px', opacity: 0.8 }}>
+                    ({formatNumber(allCoinsData.totalValueUSD * orderTotals.exchangeRate || 0, 2)} THB)
+                  </span>
+                )}
+              </span>
             </div>
             <div className="summary-item">
               <span className="summary-label">Count</span>
@@ -6067,7 +6081,7 @@ function App() {
                         <td className="table-key">{coin.coin}</td>
                         <td className="table-value">{Number(coin.quantity || 0).toFixed(8)}</td>
                         <td className="table-value">{Number(coin.latestPrice || 0).toFixed(4)}</td>
-                        <td className="table-value">{Number(coin.valueInUSDT || 0).toFixed(4)}</td>
+                        <td className="table-value">{formatNumber(coin.valueInUSDT || 0, 4)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -6267,6 +6281,33 @@ function App() {
         <div className="top-bar-content">
           {/* Orders Info */}
           <div className="top-bar-orders-info" style={{ fontSize: '15px' }}>
+            {spotReport?.portfolioValue !== undefined && (
+              <>
+                <div className="top-bar-item" style={{ borderRight: '1px solid rgba(255, 255, 255, 0.2)', paddingRight: '12px', marginRight: '8px' }}>
+                  <span className="top-bar-value" style={{ color: '#00AEFF', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {getCoinIcon('USDT') && (
+                      <img 
+                        src={getCoinIcon('USDT')} 
+                        alt="USDT"
+                        style={{ 
+                          width: '18px',
+                          height: '18px',
+                          borderRadius: '50%',
+                          objectFit: 'cover'
+                        }}
+                      />
+                    )}
+                    {formatNumber(spotReport.portfolioValue || 0, 4)} USDT
+                  </span>
+                </div>
+                <div className="top-bar-item" style={{ borderRight: '1px solid rgba(255, 255, 255, 0.2)', paddingRight: '12px', marginRight: '8px' }}>
+                  <span className="top-bar-label" style={{ color: '#00AEFF' }}>THB:</span>
+                  <span className="top-bar-value" style={{ color: '#00AEFF', fontWeight: 'bold' }}>
+                    {formatNumber((Number(spotReport.portfolioValue || 0)) * ((orderTotals && orderTotals.exchangeRate) || 36), 2)} THB
+                  </span>
+                </div>
+              </>
+            )}
             <div className="top-bar-item">
               <span className="top-bar-label">Orders:</span>
               <span className="top-bar-value">
@@ -6303,24 +6344,44 @@ function App() {
             {portfolioValueFromCoins !== null && (
               <div className="top-bar-item">
                 <span className="top-bar-label">Portfolio Value:</span>
-                <span className="top-bar-value" style={{ color: '#ffa500' }}>
-                  {portfolioValueFromCoins.toFixed(4)}
+                <span className="top-bar-value" style={{ color: '#ffa500', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {getCoinIcon('USDT') && (
+                    <img 
+                      src={getCoinIcon('USDT')} 
+                      alt="USDT"
+                      style={{ 
+                        width: '18px',
+                        height: '18px',
+                        borderRadius: '50%',
+                        objectFit: 'cover'
+                      }}
+                    />
+                  )}
+                  <span>
+                    {formatNumber(portfolioValueFromCoins, 4)} USDT
+                    {orderTotals?.exchangeRate && (
+                      <span style={{ marginLeft: '8px', color: 'inherit' }}>
+                        ({formatNumber(portfolioValueFromCoins * orderTotals.exchangeRate, 2)} THB)
+                      </span>
+                    )}
+                  </span>
                 </span>
               </div>
             )}
             {portfolioValueFromCoins !== null && selectedSetting?.buyAmountUSD && (
               <div className="top-bar-item">
-                <span className="top-bar-label">จำนวนOrder:</span>
+                <span className="top-bar-label">ซื้อได้อีก :</span>
                 <span className="top-bar-value">
                   {(portfolioValueFromCoins / Number(selectedSetting.buyAmountUSD || 1)).toFixed(2)}
                 </span>
-              </div>
+                <span className="top-bar-label">ไม้</span>
+                </div>
             )}
             {xrpCoinData && (
               <div className="top-bar-item" style={{ borderLeft: '1px solid rgba(255, 136, 0, 0.4)', paddingLeft: '12px' }}>
                 <span className="top-bar-label" style={{ color: '#ff8800' }}>XRP Snapshot:</span>
                 <span className="top-bar-value" style={{ display: 'block', fontSize: '13px' }}>
-                  Qty {Number(xrpCoinData.quantity || 0).toFixed(6)} | Value {Number(xrpCoinData.valueInUSDT || 0).toFixed(2)} USDT
+                  Qty {formatNumber(xrpCoinData.quantity || 0, 6)} | Value {formatNumber(xrpCoinData.valueInUSDT || 0, 2)} USDT
                 </span>
                 {xrpValuePerAmount !== null && (
                   <span className="top-bar-value" style={{ display: 'block', fontSize: '13px' }}>
@@ -6489,7 +6550,7 @@ function App() {
       </main>
 
       {isSettingModalOpen && modalSetting && (
-        <div className="modal-backdrop" onClick={closeSettingModal}>
+        <div className="modal-backdrop">
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <header>
               <h3>{modalMode === 'create' ? 'สร้าง Setting ใหม่' : `แก้ไข Setting #${modalSetting.id}`}</h3>
@@ -6570,7 +6631,7 @@ function App() {
       )}
 
       {isOrderModalOpen && orderModalData && (
-        <div className="modal-backdrop" onClick={closeOrderModal}>
+        <div className="modal-backdrop">
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <header>
               <h3>แก้ไข Order #{orderModalData.id}</h3>
@@ -6667,7 +6728,7 @@ function App() {
 
       {/* Sell Now Verification Modal */}
       {isSellNowVerificationOpen && pendingSellNowOrder && (
-        <div className="modal-backdrop" onClick={closeSellModal}>
+        <div className="modal-backdrop">
           <div className="modal trade-verification-modal" onClick={(e) => e.stopPropagation()}>
             <header>
               <h3>ยืนยันการขายทันที</h3>
@@ -6739,7 +6800,7 @@ function App() {
 
       {/* Buy Now Form Modal */}
       {isBuyNowFormOpen && (
-        <div className="modal-backdrop" onClick={closeBuyNowForm}>
+        <div className="modal-backdrop">
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <header>
               <h3>Create Order (Buy Now)</h3>
@@ -6789,7 +6850,7 @@ function App() {
 
       {/* Buy Now Verification Modal */}
       {isBuyNowVerificationOpen && (
-        <div className="modal-backdrop" onClick={closeBuyNowVerification}>
+        <div className="modal-backdrop">
           <div className="modal trade-verification-modal" onClick={(e) => e.stopPropagation()}>
             <header>
               <h3>ยืนยันการสร้าง Order</h3>
@@ -6854,7 +6915,7 @@ function App() {
 
       {/* Trade Verification Modal */}
       {isTradeVerificationOpen && pendingTradePayload && (
-        <div className="modal-backdrop" onClick={closeTradeVerification}>
+        <div className="modal-backdrop">
           <div className="modal trade-verification-modal" onClick={(e) => e.stopPropagation()}>
             <header>
               <h3>ยืนยันการซื้อ/ขาย</h3>
@@ -6935,21 +6996,16 @@ function App() {
 
       {/* Alert Logs Modal */}
       {showAlertLogs && (
-        <div className="modal-backdrop" onClick={() => setShowAlertLogs(false)}>
+        <div className="modal-backdrop">
           <div className="modal alert-logs-modal" onClick={(e) => e.stopPropagation()}>
             {renderAlertLogs()}
-            <div className="button-group" style={{ marginTop: '16px' }}>
-              <button className="secondary ghost" type="button" onClick={() => setShowAlertLogs(false)}>
-                Close
-              </button>
-            </div>
           </div>
         </div>
       )}
 
       {/* Trade Line Settings Modal */}
       {isTradeLineSettingsModalOpen && (
-        <div className="modal-backdrop" onClick={() => setIsTradeLineSettingsModalOpen(false)}>
+        <div className="modal-backdrop">
           <div 
             className="modal" 
             onClick={(e) => e.stopPropagation()} 
@@ -7472,7 +7528,7 @@ function App() {
 
       {/* Logout Confirmation Dialog */}
       {isLogoutConfirmOpen && (
-        <div className="modal-backdrop" onClick={cancelLogout}>
+        <div className="modal-backdrop">
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px' }}>
             <header>
               <h3>Confirm Logout</h3>
@@ -7486,7 +7542,10 @@ function App() {
               <button className="secondary ghost" type="button" onClick={cancelLogout}>
                 Cancel
               </button>
-              <button className="primary" type="button" onClick={confirmLogout} style={{ background: '#ff6b8f', borderColor: '#ff6b8f' }}>
+              <button className="primary" type="button" onClick={() => {
+                setIsLogoutConfirmOpen(false)
+                confirmLogout()
+              }} style={{ background: '#ff6b8f', borderColor: '#ff6b8f' }}>
                 Logout
               </button>
             </div>
