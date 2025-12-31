@@ -3444,6 +3444,13 @@ function App() {
 
         let primarySeries = null
         let seriesType = 'candlestick'
+        const precision = getPriceScalePrecision(resolvedChartSymbol)
+        // Price format for XRPUSDT: #.#### (4 decimal places)
+        const priceFormat = {
+          type: 'price',
+          precision: precision,
+          minMove: precision === 4 ? 0.0001 : precision === 2 ? 0.01 : 0.0001,
+        }
         const createSeries = () => {
           if (typeof chart.addCandlestickSeries === 'function') {
             return {
@@ -3454,6 +3461,7 @@ function App() {
                 borderVisible: false,
                 wickUpColor: '#26a69a',
                 wickDownColor: '#ef5350',
+                priceFormat: priceFormat,
               }),
             }
           }
@@ -3465,6 +3473,7 @@ function App() {
                 topColor: 'rgba(0, 209, 255, 0.15)',
                 bottomColor: 'rgba(0, 209, 255, 0.02)',
                 lineWidth: 2,
+                priceFormat: priceFormat,
               }),
             }
           }
@@ -3474,6 +3483,7 @@ function App() {
               series: chart.addLineSeries({
                 color: '#00d1ff',
                 lineWidth: 2,
+                priceFormat: priceFormat,
               }),
             }
           }
@@ -3486,6 +3496,7 @@ function App() {
                 bottomLineColor: '#00d1ff',
                 topFillColor1: 'rgba(0, 209, 255, 0.2)',
                 bottomFillColor1: 'rgba(0, 209, 255, 0.2)',
+                priceFormat: priceFormat,
               }),
             }
           }
@@ -3503,6 +3514,7 @@ function App() {
             ? chart.addLineSeries({
                 color: '#00d1ff',
                 lineWidth: 2,
+                priceFormat: priceFormat,
               })
             : null
           if (!fallbackLineSeries) {
@@ -3526,15 +3538,22 @@ function App() {
         engine.earliestTimeMs = null
 
         // Apply price scale precision based on symbol
-        if (primarySeries && typeof primarySeries.priceScale === 'function') {
-          const precision = getPriceScalePrecision(resolvedChartSymbol)
-          try {
+        // For XRPUSDT, format is set to #.#### (4 decimal places)
+        try {
+          // Set on the series price scale
+          if (primarySeries && typeof primarySeries.priceScale === 'function') {
             primarySeries.priceScale().applyOptions({
               precision: precision,
             })
-          } catch (err) {
-            console.warn('Failed to apply price scale precision:', err)
           }
+          // Also set on the chart's right price scale
+          if (chart && typeof chart.rightPriceScale === 'function') {
+            chart.rightPriceScale().applyOptions({
+              precision: precision,
+            })
+          }
+        } catch (err) {
+          console.warn('Failed to apply price scale precision:', err)
         }
 
         await loadInitialCandles(resolvedChartSymbol)
@@ -3620,16 +3639,37 @@ function App() {
   }, [activeTab, applyTradeDecorations, orders, plotHorizontalLines, viewMode, tradeLineSettings])
 
   // Update price scale precision when symbol changes
+  // For XRPUSDT, format is set to #.#### (4 decimal places)
   useEffect(() => {
     if (viewMode !== 'priceChart' || activeTab !== 'orders') return
     const series = priceSeriesRef.current
-    if (!series || typeof series.priceScale !== 'function') return
+    const chart = priceChartInstanceRef.current
+    if (!series) return
     
     const precision = getPriceScalePrecision(resolvedChartSymbol)
     try {
-      series.priceScale().applyOptions({
-        precision: precision,
-      })
+      // Update series price scale
+      if (typeof series.priceScale === 'function') {
+        series.priceScale().applyOptions({
+          precision: precision,
+        })
+      }
+      // Also update chart's right price scale
+      if (chart && typeof chart.rightPriceScale === 'function') {
+        chart.rightPriceScale().applyOptions({
+          precision: precision,
+        })
+      }
+      // Update series price format
+      if (typeof series.applyOptions === 'function') {
+        series.applyOptions({
+          priceFormat: {
+            type: 'price',
+            precision: precision,
+            minMove: precision === 4 ? 0.0001 : precision === 2 ? 0.01 : 0.0001,
+          },
+        })
+      }
     } catch (err) {
       console.warn('Failed to update price scale precision:', err)
     }
@@ -4865,7 +4905,25 @@ function App() {
         justifyContent: 'space-between'
       }}>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ opacity: 0.7 }}>Total: {ordersTotal}</span>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <span style={{ opacity: 0.7, fontSize: '0.875rem' }}>Total:</span>
+            <input
+              type="text"
+              value={ordersTotal}
+              readOnly
+              style={{
+                padding: '4px 8px',
+                background: 'rgba(255, 255, 255, 0.1)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: '4px',
+                color: '#fff',
+                fontSize: '0.875rem',
+                width: '80px',
+                textAlign: 'center',
+                cursor: 'default'
+              }}
+            />
+          </div>
           
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <span style={{ opacity: 0.7, fontSize: '0.875rem' }}>Page Size:</span>
@@ -4888,10 +4946,10 @@ function App() {
                 cursor: 'pointer'
               }}
             >
-              <option value={20}>20</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-              <option value={200}>200</option>
+              <option value={20} style={{ background: '#0d1524', color: '#fff' }}>20</option>
+              <option value={50} style={{ background: '#0d1524', color: '#fff' }}>50</option>
+              <option value={100} style={{ background: '#0d1524', color: '#fff' }}>100</option>
+              <option value={200} style={{ background: '#0d1524', color: '#fff' }}>200</option>
             </select>
           </div>
         </div>
