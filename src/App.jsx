@@ -442,6 +442,7 @@ function App() {
   const [priceChartData, setPriceChartData] = useState([])
   const [priceChartLoading, setPriceChartLoading] = useState(false)
   const [priceChartError, setPriceChartError] = useState(null)
+  const [nextBuyPrice, setNextBuyPrice] = useState(null)
   const [priceScaleMargins, setPriceScaleMargins] = useState({ top: 0.1, bottom: 0.1 })
   const [priceChartHeight, setPriceChartHeight] = useState(() => {
     const saved = localStorage.getItem('priceChartHeight')
@@ -768,8 +769,35 @@ function App() {
   }
 
   // Login success handler
-  const handleLoginSuccess = () => {
+  const handleLoginSuccess = async () => {
     setIsAuthenticated(true)
+    // Load all data after login success
+    try {
+      // Load settings first (needed for other data including reportConfigId)
+      await fetchSettings('settingsAfterLogin')
+      
+      // Load other data in parallel (after settings are loaded)
+      await Promise.all([
+        fetchOrders('ordersAfterLogin', ordersPage, ordersPageSize, orderFilter),
+        fetchBotStatus('botStatusAfterLogin'),
+        fetchBuyPauseStatus(),
+        fetchOrderReport(),
+        fetchUnreadCount(),
+        fetchNextBuyPrice(),
+      ])
+      
+      // Load report data after settings are loaded (needs reportConfigId from settings)
+      // reportConfigId will be set by fetchSettings if available
+      const currentReportConfigId = reportConfigId || (settings.length > 0 ? settings[0].id : null)
+      if (currentReportConfigId) {
+        await Promise.all([
+          fetchSpotReport(),
+          fetchAllCoins(),
+        ])
+      }
+    } catch (err) {
+      // Silently handle errors - data will be loaded by useEffect hooks
+    }
   }
 
   // Logout handler - show confirmation dialog
@@ -1959,6 +1987,16 @@ function App() {
       payload: action === 'start' ? { ConfigId: configId } : undefined,
       onSuccess: () => {
         fetchBotStatus(`botStatusAfter${action}`)
+        // Load next buy price after bot start/stop
+        if (action === 'start') {
+          // Delay 2 seconds before fetching next buy price after start
+          setTimeout(() => {
+            fetchNextBuyPrice()
+          }, 2000)
+        } else {
+          // Fetch immediately for stop
+          fetchNextBuyPrice()
+        }
       },
     })
   }
@@ -2350,7 +2388,35 @@ function App() {
     }
   }, [])
 
+  // Fetch next buy price from API
+  const fetchNextBuyPrice = useCallback(async () => {
+    try {
+      await runRequest('nextBuyPrice', 'BotWorker/GetNextBuyPrice', {
+        method: 'POST',
+        payload: {},
+        onSuccess: (data) => {
+          if (data?.success && data?.nextBuyPrice !== null && data?.nextBuyPrice !== undefined) {
+            setNextBuyPrice(Number(data.nextBuyPrice))
+          } else {
+            setNextBuyPrice(null)
+          }
+        },
+        onError: (err) => {
+          setNextBuyPrice(null)
+        },
+      })
+    } catch (err) {
+      setNextBuyPrice(null)
+    }
+  }, [])
+
   const calculateNextEntry = useCallback((orders) => {
+    // Use API value if available
+    if (nextBuyPrice !== null && nextBuyPrice !== undefined && nextBuyPrice > 0) {
+      return nextBuyPrice
+    }
+    
+    // Fallback to calculation if API value not available
     if (!Array.isArray(orders) || orders.length === 0) return null
 
     // Find last order (most recent)
@@ -2390,7 +2456,7 @@ function App() {
     }
 
     return null
-  }, [settings])
+  }, [settings, nextBuyPrice])
 
   // Function to update NextEntry line title with real-time percentage
   const updateNextEntryLine = useCallback(() => {
@@ -2429,7 +2495,9 @@ function App() {
       candleSeries.removePriceLine(engine.nextEntryPriceLine)
       const lineConfig = lines.nextEntry
       const lineType = lineConfig?.type || 'dot'
-      const lineColor = lineConfig?.color || '#0066FF'
+      const lineColor = (nextBuyPrice === null || nextBuyPrice === undefined) 
+        ? '#eaf2ff' 
+        : (lineConfig?.color || '#0066FF')
       
       const newPriceLine = candleSeries.createPriceLine({
         price: nextEntryPrice,
@@ -2450,7 +2518,7 @@ function App() {
       engine.nextEntryPriceLine = newPriceLine
     } catch (err) {
     }
-  }, [tradeLineSettings, calculateNextEntry])
+  }, [tradeLineSettings, calculateNextEntry, nextBuyPrice])
 
   const updateSeriesPoint = useCallback((point) => {
     if (!priceSeriesRef.current || !point) return
@@ -3032,7 +3100,9 @@ function App() {
     if (buttons.toggleNextEntry && lines.nextEntry?.visible && nextEntryPrice !== null) {
       const lineConfig = lines.nextEntry
       const lineType = lineConfig?.type || 'dot'
-      const lineColor = lineConfig?.color || '#0066FF'
+      const lineColor = (nextBuyPrice === null || nextBuyPrice === undefined) 
+        ? '#eaf2ff' 
+        : (lineConfig?.color || '#0066FF')
       const currentTime = Math.floor(Date.now() / 1000)
       const timeSpan = 60 * 60 * 24 // 24 hours
 
@@ -3294,7 +3364,7 @@ function App() {
     if (markers.length > 0) {
       candleSeries.setMarkers(markers)
     }
-  }, [tradeLineSettings, calculateNextEntry])
+  }, [tradeLineSettings, calculateNextEntry, nextBuyPrice])
 
   const plotHorizontalLines = useCallback((linesData) => {
     const engine = priceChartEngineRef.current
@@ -3621,6 +3691,20 @@ function App() {
     resetPriceChartDecorations,
   ])
 
+  // Fetch next buy price when chart is active
+  useEffect(() => {
+    if (viewMode !== 'priceChart' || activeTab !== 'orders') return
+    if (!isAuthenticated) return
+    fetchNextBuyPrice()
+  }, [viewMode, activeTab, isAuthenticated, fetchNextBuyPrice])
+
+  // Refresh next buy price when orders change
+  useEffect(() => {
+    if (viewMode !== 'priceChart' || activeTab !== 'orders') return
+    if (!isAuthenticated) return
+    fetchNextBuyPrice()
+  }, [orders, viewMode, activeTab, isAuthenticated, fetchNextBuyPrice])
+
   useEffect(() => {
     if (viewMode !== 'priceChart' || activeTab !== 'orders') return
     if (!priceSeriesRef.current || !priceChartInstanceRef.current) return
@@ -3860,6 +3944,54 @@ function App() {
     const lastPrice =
       numericLastPrice !== null && Number.isFinite(numericLastPrice) ? numericLastPrice.toFixed(4) : null
     
+    // Calculate LastAction price (same logic as in applyTradeDecorations)
+    let lastActionPrice = null
+    if (Array.isArray(orders) && orders.length > 0) {
+      const sortedOrders = [...orders].sort((a, b) => {
+        const timeA = parseTimestamp(a.dateSell ?? a.dateBuy)
+        const timeB = parseTimestamp(b.dateSell ?? b.dateBuy)
+        return (timeB || 0) - (timeA || 0)
+      })
+      const lastOrder = sortedOrders[0]
+      if (lastOrder) {
+        const status = String(lastOrder.status || '').trim().toUpperCase()
+        if (status === 'WAITING_SELL') {
+          lastActionPrice = Number(lastOrder.priceBuy ?? 0)
+        } else if (status === 'SOLD') {
+          lastActionPrice = Number(lastOrder.priceSellActual ?? 0)
+        }
+      }
+    }
+    // Fallback to chart data if no valid order price
+    if (!lastActionPrice || !Number.isFinite(lastActionPrice) || lastActionPrice <= 0) {
+      lastActionPrice = numericLastPrice
+    }
+    
+    // Calculate NextSell price (min waitSell price from WAITING_SELL orders)
+    let nextSellPrice = null
+    if (Array.isArray(orders) && orders.length > 0) {
+      const waitSellOrders = orders.filter((o) => String(o?.status || '').toUpperCase() === 'WAITING_SELL')
+      const waitSellPrices = waitSellOrders
+        .map((o) => Number(o.priceWaitSell ?? 0))
+        .filter((p) => p > 0)
+      if (waitSellPrices.length > 0) {
+        nextSellPrice = Math.min(...waitSellPrices)
+      }
+    }
+    
+    // Calculate percentages
+    let nextBuyToNextSellPercent = null
+    if (nextBuyPrice !== null && nextBuyPrice !== undefined && nextBuyPrice > 0 && 
+        nextSellPrice !== null && nextSellPrice > 0) {
+      nextBuyToNextSellPercent = ((nextSellPrice - nextBuyPrice) / nextBuyPrice) * 100
+    }
+    
+    let lastActionToNextBuyPercent = null
+    if (lastActionPrice !== null && lastActionPrice > 0 && 
+        nextBuyPrice !== null && nextBuyPrice !== undefined && nextBuyPrice > 0) {
+      lastActionToNextBuyPercent = ((nextBuyPrice - lastActionPrice) / lastActionPrice) * 100
+    }
+    
     const fullscreenStyle = isPriceChartFullscreen
       ? {
           position: 'fixed',
@@ -3914,6 +4046,16 @@ function App() {
               {lastPrice && (
                 <p className="eyebrow mono" style={{ marginTop: '4px' }}>
                   Last Close: {lastPrice}
+                  {nextBuyToNextSellPercent !== null && (
+                    <span style={{ marginLeft: '8px', color: '#00AEFF' }}>
+                      | NextBuy→NextSell: {nextBuyToNextSellPercent >= 0 ? '+' : ''}{nextBuyToNextSellPercent.toFixed(3)}%
+                    </span>
+                  )}
+                  {lastActionToNextBuyPercent !== null && (
+                    <span style={{ marginLeft: '8px', color: '#808080' }}>
+                      | LastAction→NextBuy: {lastActionToNextBuyPercent >= 0 ? '+' : ''}{lastActionToNextBuyPercent.toFixed(3)}%
+                    </span>
+                  )}
                 </p>
               )}
             </div>
