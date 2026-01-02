@@ -401,23 +401,12 @@ function App() {
   const [orders, setOrders] = useState([])
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError] = useState(null)
-  // Separate orders for Price Chart and Report
-  const [chartOrders, setChartOrders] = useState([])
-  const [chartOrdersLoading, setChartOrdersLoading] = useState(false)
-  const [chartOrdersError, setChartOrdersError] = useState(null)
-  const [reportOrders, setReportOrders] = useState([])
-  const [reportOrdersLoading, setReportOrdersLoading] = useState(false)
-  const [reportOrdersError, setReportOrdersError] = useState(null)
-  // Separate orders for WaitSell lines in Price Chart
-  const [waitSellOrders, setWaitSellOrders] = useState([])
-  const [waitSellOrdersLoading, setWaitSellOrdersLoading] = useState(false)
-  const [waitSellOrdersError, setWaitSellOrdersError] = useState(null)
   const [orderReport, setOrderReport] = useState(null)
   const [orderReportLoading, setOrderReportLoading] = useState(false)
   const [orderReportError, setOrderReportError] = useState(null)
   const [orderFilter, setOrderFilter] = useState(() => loadPrimitiveState('orderFilter', 'all')) // 'all', 'SOLD', 'WAITING_SELL'
   const [ordersPage, setOrdersPage] = useState(1)
-  const [ordersPageSize, setOrdersPageSize] = useState(() => loadPrimitiveState('ordersPageSize', 20))
+  const [ordersPageSize, setOrdersPageSize] = useState(() => loadPrimitiveState('ordersPageSize', 100))
   const [ordersTotal, setOrdersTotal] = useState(0)
   const [orderViewMode, setOrderViewMode] = useState(() => loadPrimitiveState('orderViewMode', 'card')) // 'card' or 'table'
   const [ordersSort, setOrdersSort] = useState({
@@ -450,9 +439,6 @@ function App() {
   const [customChartSymbol, setCustomChartSymbol] = useState(() =>
     loadPrimitiveState('customChartSymbol', 'XRPUSDT')
   )
-  const [chartOrdersLimit, setChartOrdersLimit] = useState(() =>
-    loadPrimitiveState('chartOrdersLimit', '100')
-  ) // '100', '200', '500', 'all'
   const [priceChartData, setPriceChartData] = useState([])
   const [priceChartLoading, setPriceChartLoading] = useState(false)
   const [priceChartError, setPriceChartError] = useState(null)
@@ -647,13 +633,6 @@ function App() {
     ordersRef.current = orders
   }, [orders])
 
-  // Update ordersRef with chartOrders for Price Chart
-  useEffect(() => {
-    if (viewMode === 'priceChart' && activeTab === 'orders') {
-      ordersRef.current = chartOrders
-    }
-  }, [chartOrders, viewMode, activeTab])
-
   useEffect(() => {
     priceChartEngineRef.current.interval = priceChartInterval || '1m'
   }, [priceChartInterval])
@@ -801,9 +780,6 @@ function App() {
       // Load other data in parallel (after settings are loaded)
       await Promise.all([
         fetchOrders('ordersAfterLogin', ordersPage, ordersPageSize, orderFilter),
-        fetchChartOrders(), // Fetch orders for Price Chart
-        fetchWaitSellOrders(), // Fetch WaitSell orders for Price Chart
-        fetchReportOrders(), // Fetch orders for Report
         fetchBotStatus('botStatusAfterLogin'),
         fetchBuyPauseStatus(),
         fetchOrderReport(),
@@ -983,88 +959,6 @@ function App() {
       })
     } finally {
       setOrdersLoading(false)
-    }
-  }
-
-  // Fetch orders for Price Chart using GetOrdersByPage
-  const fetchChartOrders = useCallback(async () => {
-    setChartOrdersLoading(true)
-    setChartOrdersError(null)
-    try {
-      // Determine pageSize based on selected limit
-      let pageSize = 200
-      if (chartOrdersLimit === 'all') {
-        pageSize = 10000 // Large number to get all orders
-      } else {
-        pageSize = Number(chartOrdersLimit) || 200
-      }
-
-      await runRequest('chartOrders', 'SQLite/GetOrdersByPage', {
-        method: 'POST',
-        payload: {
-          page: 1,
-          pageSize: pageSize,
-          filter: 'All',
-        },
-        onSuccess: (payload) => {
-          const items = Array.isArray(payload?.data) ? payload.data : []
-          setChartOrders(items)
-          setChartOrdersError(null)
-        },
-        onError: (err) => {
-          setChartOrdersError(err)
-        },
-      })
-    } finally {
-      setChartOrdersLoading(false)
-    }
-  }, [chartOrdersLimit])
-
-  // Fetch WaitSell orders for Price Chart using GetOrdersByPage
-  const fetchWaitSellOrders = useCallback(async () => {
-    setWaitSellOrdersLoading(true)
-    setWaitSellOrdersError(null)
-    try {
-      await runRequest('waitSellOrders', 'SQLite/GetOrdersByPage', {
-        method: 'POST',
-        payload: {
-          page: 1,
-          pageSize: 400,
-          filter: 'WAITING_SELL',
-        },
-        onSuccess: (payload) => {
-          const items = Array.isArray(payload?.data) ? payload.data : []
-          setWaitSellOrders(items)
-          setWaitSellOrdersError(null)
-        },
-        onError: (err) => {
-          setWaitSellOrdersError(err)
-        },
-      })
-    } finally {
-      setWaitSellOrdersLoading(false)
-    }
-  }, [])
-
-  // Fetch all orders for Report (no pagination)
-  const fetchReportOrders = async () => {
-    setReportOrdersLoading(true)
-    setReportOrdersError(null)
-    try {
-      await runRequest('reportOrders', 'SQLite/GetOrders', {
-        method: 'POST',
-        payload: {},
-        onSuccess: (payload) => {
-          const items = Array.isArray(payload) ? payload : (Array.isArray(payload?.data) ? payload.data : [])
-          setReportOrders(items)
-          setReportOrdersError(null)
-        },
-        onError: (err) => {
-          setReportOrdersError(err)
-        },
-      })
-    } finally {
-      setReportOrdersLoading(false)
     }
   }
 
@@ -1515,22 +1409,6 @@ function App() {
     }
   }, [activeTab])
 
-  // Fetch chartOrders and waitSellOrders when Price Chart is active
-  useEffect(() => {
-    if (viewMode === 'priceChart' && activeTab === 'orders' && isAuthenticated) {
-      fetchChartOrders()
-      fetchWaitSellOrders()
-    }
-  }, [viewMode, activeTab, isAuthenticated, fetchChartOrders, fetchWaitSellOrders])
-
-  // Fetch reportOrders when Report tab is active
-  useEffect(() => {
-    if (activeTab === 'report' && isAuthenticated) {
-      fetchReportOrders()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, isAuthenticated])
-
   useEffect(() => {
     if (activeTab === 'orders') {
       fetchBuyPauseStatus()
@@ -1778,8 +1656,7 @@ function App() {
     if (!reportConfigId) return []
     const targetId = Number(reportConfigId)
     if (!Number.isFinite(targetId)) return []
-    // Use reportOrders (from api/SQLite/GetOrders) instead of orders
-    return (reportOrders || []).filter((order) => {
+    return (orders || []).filter((order) => {
       const orderConfigId = Number(
         order?.setting_ID ??
           order?.settingId ??
@@ -1794,7 +1671,7 @@ function App() {
       if (!Number.isFinite(orderConfigId)) return false
       return orderConfigId === targetId
     })
-  }, [reportOrders, reportConfigId])
+  }, [orders, reportConfigId])
 
   const processOrdersForChart = useMemo(() => {
     if (!Array.isArray(ordersForChart) || ordersForChart.length === 0) return []
@@ -2661,7 +2538,7 @@ function App() {
       engine.nextEntryPriceLine = newPriceLine
     } catch (err) {
     }
-  }, [tradeLineSettings, calculateNextEntry, nextBuyPrice, waitSellOrders])
+  }, [tradeLineSettings, calculateNextEntry, nextBuyPrice])
 
   const updateSeriesPoint = useCallback((point) => {
     if (!priceSeriesRef.current || !point) return
@@ -2952,8 +2829,7 @@ function App() {
 
     const markers = []
     const hasOrders = Array.isArray(orders) && orders.length > 0
-    // Use waitSellOrders from API (api/SQLite/GetOrdersByPage with filter WAITING_SELL) instead of filtering from orders
-    const waitSellOrdersForChart = Array.isArray(waitSellOrders) && waitSellOrders.length > 0 ? waitSellOrders : []
+    const waitSellOrders = hasOrders ? orders.filter((o) => String(o?.status || '').toUpperCase() === 'WAITING_SELL') : []
     const nextEntryPrice = hasOrders ? calculateNextEntry(orders) : null
 
     // Plot Buy-Sell markers/lines
@@ -3155,12 +3031,12 @@ function App() {
 
     // Plot WaitSell lines
     if (buttons.toggleWaitSell && lines.waitSell?.visible) {
-      // Calculate min price (A) from all waitSellOrders (from API)
-      const allWaitSellPrices = waitSellOrdersForChart
+      // Calculate min price (A) from all waitSellOrders
+      const allWaitSellPrices = waitSellOrders
         .map((o) => Number(o.priceWaitSell ?? 0))
         .filter((p) => p > 0)
       //const minPrice = allWaitSellPrices.length > 0 ? Math.min(...allWaitSellPrices) : null
-      const waitSellOrders_Sorted = [...waitSellOrdersForChart].sort((a, b) => a.priceWaitSell - b.priceWaitSell)
+      const waitSellOrders_Sorted = waitSellOrders.sort((a, b) => a.priceWaitSell - b.priceWaitSell)
       waitSellOrders_Sorted.forEach((order , index) => {
         const _minPrice = order.priceWaitSell
         const waitSellPrice = Number(order.priceWaitSell ?? 0)
@@ -3179,7 +3055,7 @@ function App() {
             // Find next high price (B) - price higher than current waitSellPrice
             //const nextHighPrices = allWaitSellPrices.filter((p) => p > waitSellPrice)
             //const nextHighPrice = nextHighPrices.length > 0 ? Math.min(...nextHighPrices) : null
-            const nextHighPrice = waitSellOrders_Sorted[index + 1]?.priceWaitSell ?? 0
+            const nextHighPrice = waitSellOrders[index + 1]?.priceWaitSell ?? 0
             if (nextHighPrice !== null && nextHighPrice > 0) {
               // x% = (B - A) / A * 100
               const percent = ((nextHighPrice - _minPrice) / _minPrice) * 100
@@ -3329,10 +3205,10 @@ function App() {
       }
     }
 
-    // Plot NextSell (WaitSellPrice from WAITING_SELL orders from API)
+    // Plot NextSell (WaitSellPrice from WAITING_SELL orders)
     if (buttons.toggleNextSell && lines.nextSell?.visible) {
       // Find the WAITING_SELL order with minimum Wait Sell Price
-      const sortedWaitSellOrders = [...waitSellOrdersForChart]
+      const sortedWaitSellOrders = [...waitSellOrders]
         .filter((o) => Number(o.priceWaitSell ?? 0) > 0)
         .sort((a, b) => {
           const priceA = Number(a.priceWaitSell ?? 0)
@@ -3508,7 +3384,7 @@ function App() {
     if (markers.length > 0) {
       candleSeries.setMarkers(markers)
     }
-  }, [tradeLineSettings, calculateNextEntry, nextBuyPrice, waitSellOrders])
+  }, [tradeLineSettings, calculateNextEntry, nextBuyPrice])
 
   const plotHorizontalLines = useCallback((linesData) => {
     const engine = priceChartEngineRef.current
@@ -3762,9 +3638,8 @@ function App() {
         }
 
         await loadInitialCandles(resolvedChartSymbol)
-        // Use chartOrders for Price Chart (from api/SQLite/GetOrdersByPage)
-        applyTradeDecorations(chartOrders)
-        plotHorizontalLines(buildHorizontalLinesFromOrders(chartOrders))
+        applyTradeDecorations(ordersRef.current)
+        plotHorizontalLines(buildHorizontalLinesFromOrders(ordersRef.current))
         startRealtimeFeed(resolvedChartSymbol)
 
         handleRangeChange = async (logicalRange) => {
@@ -3853,10 +3728,9 @@ function App() {
   useEffect(() => {
     if (viewMode !== 'priceChart' || activeTab !== 'orders') return
     if (!priceSeriesRef.current || !priceChartInstanceRef.current) return
-    // Use chartOrders instead of orders for Price Chart
-    applyTradeDecorations(chartOrders)
-    plotHorizontalLines(buildHorizontalLinesFromOrders(chartOrders))
-  }, [activeTab, applyTradeDecorations, chartOrders, plotHorizontalLines, viewMode, tradeLineSettings])
+    applyTradeDecorations(orders)
+    plotHorizontalLines(buildHorizontalLinesFromOrders(orders))
+  }, [activeTab, applyTradeDecorations, orders, plotHorizontalLines, viewMode, tradeLineSettings])
 
   // Update price scale precision when symbol changes
   // For XRPUSDT, format is set to #.#### (4 decimal places)
@@ -4091,10 +3965,9 @@ function App() {
       numericLastPrice !== null && Number.isFinite(numericLastPrice) ? numericLastPrice.toFixed(4) : null
     
     // Calculate LastAction price (same logic as in applyTradeDecorations)
-    // Use chartOrders for Price Chart (from api/SQLite/GetOrders)
     let lastActionPrice = null
-    if (Array.isArray(chartOrders) && chartOrders.length > 0) {
-      const sortedOrders = [...chartOrders].sort((a, b) => {
+    if (Array.isArray(orders) && orders.length > 0) {
+      const sortedOrders = [...orders].sort((a, b) => {
         const timeA = parseTimestamp(a.dateSell ?? a.dateBuy)
         const timeB = parseTimestamp(b.dateSell ?? b.dateBuy)
         return (timeB || 0) - (timeA || 0)
@@ -4115,10 +3988,9 @@ function App() {
     }
     
     // Calculate NextSell price (min waitSell price from WAITING_SELL orders)
-    // Use chartOrders for Price Chart (from api/SQLite/GetOrders)
     let nextSellPrice = null
-    if (Array.isArray(chartOrders) && chartOrders.length > 0) {
-      const waitSellOrders = chartOrders.filter((o) => String(o?.status || '').toUpperCase() === 'WAITING_SELL')
+    if (Array.isArray(orders) && orders.length > 0) {
+      const waitSellOrders = orders.filter((o) => String(o?.status || '').toUpperCase() === 'WAITING_SELL')
       const waitSellPrices = waitSellOrders
         .map((o) => Number(o.priceWaitSell ?? 0))
         .filter((p) => p > 0)
@@ -4189,27 +4061,6 @@ function App() {
                       {option.label}
                     </option>
                   ))}
-                </select>
-                <select
-                  className="price-chart-symbol-select"
-                  value={chartOrdersLimit}
-                  onChange={(e) => {
-                    setChartOrdersLimit(e.target.value)
-                    // Save to localStorage
-                    if (typeof window !== 'undefined') {
-                      localStorage.setItem('chartOrdersLimit', e.target.value)
-                    }
-                    // Fetch new data with new limit
-                    setTimeout(() => {
-                      fetchChartOrders()
-                    }, 100)
-                  }}
-                  style={{ marginLeft: '8px', minWidth: '100px' }}
-                >
-                  <option value="100">Limit: 100</option>
-                  <option value="200">Limit: 200</option>
-                  <option value="500">Limit: 500</option>
-                  <option value="all">Limit: All</option>
                 </select>
               </div>
               {lastPrice && (
@@ -5054,14 +4905,14 @@ function App() {
   }, [orderReport, orders])
 
   const orderTotals = useMemo(() => {
-    // Use reportOrders (separate from Orders tab) for Report calculations
-    const waitingOrders = reportOrders.filter((o) => o?.status === 'WAITING_SELL')
+    // Calculate waitingCoinQtyTotal from orders (API doesn't provide this)
+    const waitingOrders = orders.filter((o) => o?.status === 'WAITING_SELL')
     const waitingCoinQtyTotal = waitingOrders.reduce((sum, order) => {
       const qty = Number(order?.coinQuantity ?? order?.quantity ?? 0)
       return sum + qty
     }, 0)
     
-    // Use API data for soldProfitLoss if available, otherwise fallback to reportOrders calculation
+    // Use API data for soldProfitLoss if available, otherwise fallback to orders calculation
     if (orderReport?.soldProfitLoss) {
       return {
         waitingCoinQtyTotal,
@@ -5071,8 +4922,8 @@ function App() {
       }
     }
     
-    // Fallback to reportOrders calculation for soldProfitLoss
-    const soldOrders = reportOrders.filter((o) => o?.status === 'SOLD')
+    // Fallback to orders calculation for soldProfitLoss
+    const soldOrders = orders.filter((o) => o?.status === 'SOLD')
     const soldProfitLossTotal = soldOrders.reduce((sum, order) => {
       const profit = Number(order?.profitLoss ?? 0)
       return sum + profit
@@ -5082,7 +4933,7 @@ function App() {
       waitingCoinQtyTotal,
       soldProfitLossTotal,
     }
-  }, [orderReport, reportOrders])
+  }, [orderReport, orders])
 
   // Get bot status for Orders tab (same logic as Tab Bot)
   const ordersBotStatus = useMemo(() => {
@@ -6041,13 +5892,13 @@ function App() {
           </div>
         )}
 
-        {reportConfigId && reportOrdersLoading && (
+        {reportConfigId && ordersLoading && (
           <div className="state-block" style={{ marginTop: '20px' }}>
             กำลังโหลด Orders...
           </div>
         )}
 
-        {reportConfigId && !reportOrdersLoading && (
+        {reportConfigId && !ordersLoading && (
           <>
             {processOrdersForChart.length > 0 ? (
               <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
@@ -6622,12 +6473,7 @@ function App() {
             <div className="top-bar-item">
               <span className="top-bar-label">Orders:</span>
               <span className="top-bar-value">
-                All: {orderCounts.all} | <span style={{ color: '#00ff00' }}>SOLD: {orderCounts.sold}</span> | <span style={{ color: '#00d1ff' }}>WAITING: {orderCounts.waiting}</span>
-                {portfolioValueFromCoins !== null && selectedSetting?.buyAmountUSD && (
-                  <span style={{ marginLeft: '12px', color: '#00d1ff' }}>
-                    | ซื้อได้อีก: <span style={{ color: '#00d1ff' }}>{(portfolioValueFromCoins / Number(selectedSetting.buyAmountUSD || 1)).toFixed(2)} ไม้</span>
-                  </span>
-                )}
+                All: {orderCounts.all} | <span style={{ color: '#00ff00' }}>SOLD: {orderCounts.sold}</span> | <span style={{ color: '#ffa500' }}>WAITING: {orderCounts.waiting}</span>
               </span>
             </div>
             <div className="top-bar-item">
@@ -6684,46 +6530,24 @@ function App() {
                 </span>
               </div>
             )}
-            {xrpCoinData && (
-              <div className="top-bar-item" style={{ borderLeft: '1px solid #ffa500', paddingLeft: '12px' }}>
-                <span className="top-bar-label" style={{  display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  {getCoinIcon('XRP') && (
-                    <img 
-                      src={getCoinIcon('XRP')} 
-                      alt="XRP"
-                      style={{ 
-                        width: '16px',
-                        height: '16px',
-                        borderRadius: '50%',
-                        objectFit: 'cover'
-                      }}
-                    />
-                  )}
-                  XRP Snapshot:
+            {portfolioValueFromCoins !== null && selectedSetting?.buyAmountUSD && (
+              <div className="top-bar-item">
+                <span className="top-bar-label">ซื้อได้อีก :</span>
+                <span className="top-bar-value">
+                  {(portfolioValueFromCoins / Number(selectedSetting.buyAmountUSD || 1)).toFixed(2)}
                 </span>
-                <span className="top-bar-value" style={{ display: 'block', fontSize: '13px', color: '#00d1ff' }}>
+                <span className="top-bar-label">ไม้</span>
+                </div>
+            )}
+            {xrpCoinData && (
+              <div className="top-bar-item" style={{ borderLeft: '1px solid rgba(255, 136, 0, 0.4)', paddingLeft: '12px' }}>
+                <span className="top-bar-label" style={{ color: '#ff8800' }}>XRP Snapshot:</span>
+                <span className="top-bar-value" style={{ display: 'block', fontSize: '13px' }}>
                   Qty {formatNumber(xrpCoinData.quantity || 0, 6)} | Value {formatNumber(xrpCoinData.valueInUSDT || 0, 2)} USDT
-                  {orderTotals?.exchangeRate && (
-                    <span style={{ marginLeft: '8px', color: 'inherit' }}>
-                      ({formatNumber((xrpCoinData.valueInUSDT || 0) * orderTotals.exchangeRate, 2)} THB)
-                    </span>
-                  )}
                 </span>
                 {xrpValuePerAmount !== null && (
-                  <span className="top-bar-value" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#00d1ff' }}>
-                    {getCoinIcon('XRP') && (
-                      <img 
-                        src={getCoinIcon('XRP')} 
-                        alt="XRP"
-                        style={{ 
-                          width: '14px',
-                          height: '14px',
-                          borderRadius: '50%',
-                          objectFit: 'cover'
-                        }}
-                      />
-                    )}
-                    <span>จำนวนOrder: <span style={{ color: '#00d1ff' }}>{xrpValuePerAmount.toFixed(4)}</span></span>
+                  <span className="top-bar-value" style={{ display: 'block', fontSize: '13px' }}>
+                    จำนวนOrder: {xrpValuePerAmount.toFixed(4)}
                   </span>
                 )}
               </div>
