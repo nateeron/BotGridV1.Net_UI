@@ -451,7 +451,7 @@ function App() {
     loadPrimitiveState('customChartSymbol', 'XRPUSDT')
   )
   const [chartOrdersLimit, setChartOrdersLimit] = useState(() =>
-    loadPrimitiveState('chartOrdersLimit', '100')
+    loadPrimitiveState('chartOrdersLimit', '20')
   ) // '100', '200', '500', 'all'
   const [priceChartData, setPriceChartData] = useState([])
   const [priceChartLoading, setPriceChartLoading] = useState(false)
@@ -992,11 +992,11 @@ function App() {
     setChartOrdersError(null)
     try {
       // Determine pageSize based on selected limit
-      let pageSize = 200
+      let pageSize = 20
       if (chartOrdersLimit === 'all') {
         pageSize = 10000 // Large number to get all orders
       } else {
-        pageSize = Number(chartOrdersLimit) || 200
+        pageSize = Number(chartOrdersLimit) || 20
       }
 
       await runRequest('chartOrders', 'SQLite/GetOrdersByPage', {
@@ -4206,6 +4206,8 @@ function App() {
                   }}
                   style={{ marginLeft: '8px', minWidth: '100px' }}
                 >
+                  <option value="20">Limit: 20</option>
+                  <option value="50">Limit: 50</option>
                   <option value="100">Limit: 100</option>
                   <option value="200">Limit: 200</option>
                   <option value="500">Limit: 500</option>
