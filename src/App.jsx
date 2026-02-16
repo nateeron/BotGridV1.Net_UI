@@ -425,6 +425,7 @@ function App() {
     direction: 'desc',
   })
   const [buyPauseStatus, setBuyPauseStatus] = useState({ isPaused: false, loading: false, message: '' })
+  const [tradingModeStatus, setTradingModeStatus] = useState({ loading: false, mode: null, message: '', error: null })
   const [settings, setSettings] = useState([])
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [settingsError, setSettingsError] = useState(null)
@@ -806,6 +807,7 @@ function App() {
         fetchReportOrders(), // Fetch orders for Report
         fetchBotStatus('botStatusAfterLogin'),
         fetchBuyPauseStatus(),
+        fetchTradingMode(),
         fetchOrderReport(),
         fetchUnreadCount(),
         fetchNextBuyPrice(),
@@ -1132,6 +1134,65 @@ function App() {
       })
     } catch (err) {
       setBuyPauseStatus(prev => ({ ...prev, loading: false }))
+    }
+  }
+
+  const fetchTradingMode = async () => {
+    const configId = selectedSettingId ?? 1
+    setTradingModeStatus(prev => ({ ...prev, loading: true, error: null }))
+    try {
+      await runRequest('tradingMode', 'BotWorker/GetTradingMode', {
+        method: 'POST',
+        payload: { ConfigId: configId },
+        onSuccess: (payload) => {
+          setTradingModeStatus({
+            loading: false,
+            mode: payload?.mode ?? null,
+            message: payload?.message ?? '',
+            error: null,
+          })
+        },
+        onError: (err) => {
+          setTradingModeStatus(prev => ({
+            ...prev,
+            loading: false,
+            message: '',
+            error: err?.message || err?.data || 'Failed to get trading mode',
+          }))
+        },
+      })
+    } catch (err) {
+      setTradingModeStatus(prev => ({ ...prev, loading: false, error: err?.message }))
+    }
+  }
+
+  const switchTradingMode = async () => {
+    const configId = selectedSettingId ?? 1
+    const currentMode = tradingModeStatus.mode
+    const nextMode = currentMode === 'MarginCross' ? 'Spot' : 'MarginCross'
+    setTradingModeStatus(prev => ({ ...prev, loading: true, error: null }))
+    try {
+      await runRequest('switchTradingMode', 'BotWorker/SwitchTradingMode', {
+        method: 'POST',
+        payload: { ConfigId: configId, Mode: nextMode },
+        onSuccess: (payload) => {
+          setTradingModeStatus({
+            loading: false,
+            mode: payload?.mode ?? nextMode,
+            message: payload?.message ?? '',
+            error: null,
+          })
+        },
+        onError: (err) => {
+          setTradingModeStatus(prev => ({
+            ...prev,
+            loading: false,
+            error: err?.message || err?.data || 'Failed to switch trading mode',
+          }))
+        },
+      })
+    } catch (err) {
+      setTradingModeStatus(prev => ({ ...prev, loading: false, error: err?.message }))
     }
   }
 
@@ -1536,6 +1597,13 @@ function App() {
       fetchBuyPauseStatus()
     }
   }, [activeTab])
+
+  useEffect(() => {
+    if (activeTab === 'orders' && isAuthenticated) {
+      fetchTradingMode()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedSettingId, isAuthenticated])
 
   // SignalR connection for real-time order updates
   useEffect(() => {
@@ -6762,6 +6830,40 @@ function App() {
                 style={{ fontSize: '0.75rem', padding: '4px 8px', minWidth: '60px' }}
               >
                 {buyPauseStatus.loading ? '...' : buyPauseStatus.isPaused ? 'Resume' : 'Pause'}
+              </button>
+            </div>
+
+            {/* Trading Mode Status and Switch */}
+            <div className="top-bar-control-item">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.875rem', opacity: 0.7 }}>Trading:</span>
+                <span
+                  style={{
+                    fontSize: '0.875rem',
+                    opacity: 0.9,
+                    color:
+                      tradingModeStatus.mode === 'MarginCross'
+                        ? '#b57df3'
+                        : tradingModeStatus.mode === 'Spot'
+                          ? '#ef9f4d'
+                          : undefined,
+                  }}
+                >
+                  {tradingModeStatus.loading
+                    ? '...'
+                    : tradingModeStatus.error
+                      ? tradingModeStatus.error
+                      : tradingModeStatus.message || tradingModeStatus.mode || '—'}
+                </span>
+              </div>
+              <button
+                className="secondary small"
+                onClick={switchTradingMode}
+                disabled={tradingModeStatus.loading}
+                style={{ fontSize: '0.75rem', padding: '4px 8px', minWidth: '70px' }}
+                title={tradingModeStatus.mode === 'MarginCross' ? 'Switch to Spot' : 'Switch to MarginCross'}
+              >
+                {tradingModeStatus.loading ? '...' : 'Switch'}
               </button>
             </div>
 
