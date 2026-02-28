@@ -459,6 +459,7 @@ function App() {
   const [priceChartError, setPriceChartError] = useState(null)
   const [nextBuyPrice, setNextBuyPrice] = useState(null)
   const fetchNextBuyPriceRef = useRef(null)
+  const fetchOrdersRef = useRef(null)
   const [priceScaleMargins, setPriceScaleMargins] = useState({ top: 0.1, bottom: 0.1 })
   const [priceChartHeight, setPriceChartHeight] = useState(() => {
     const saved = localStorage.getItem('priceChartHeight')
@@ -987,6 +988,7 @@ function App() {
       setOrdersLoading(false)
     }
   }
+  fetchOrdersRef.current = fetchOrders
 
   // Fetch orders for Price Chart using GetOrdersByPage
   const fetchChartOrders = useCallback(async () => {
@@ -1138,17 +1140,20 @@ function App() {
   }
 
   const fetchTradingMode = async () => {
-    const configId = selectedSettingId ?? 1
+    if (!reportConfigId) return
     setTradingModeStatus(prev => ({ ...prev, loading: true, error: null }))
     try {
       await runRequest('tradingMode', 'BotWorker/GetTradingMode', {
         method: 'POST',
-        payload: { ConfigId: configId },
+        payload: { ConfigId: reportConfigId },
         onSuccess: (payload) => {
+          const data = payload?.data ?? payload
+          const mode = typeof data?.mode === 'string' ? data.mode : (data?.mode ?? null)
+          const message = typeof data?.message === 'string' ? data.message : (data?.message != null ? String(data.message) : '')
           setTradingModeStatus({
             loading: false,
-            mode: payload?.mode ?? null,
-            message: payload?.message ?? '',
+            mode,
+            message,
             error: null,
           })
         },
@@ -1167,19 +1172,22 @@ function App() {
   }
 
   const switchTradingMode = async () => {
-    const configId = selectedSettingId ?? 1
+    if (!reportConfigId) return
     const currentMode = tradingModeStatus.mode
     const nextMode = currentMode === 'MarginCross' ? 'Spot' : 'MarginCross'
     setTradingModeStatus(prev => ({ ...prev, loading: true, error: null }))
     try {
       await runRequest('switchTradingMode', 'BotWorker/SwitchTradingMode', {
         method: 'POST',
-        payload: { ConfigId: configId, Mode: nextMode },
+        payload: { ConfigId: reportConfigId, Mode: nextMode },
         onSuccess: (payload) => {
+          const data = payload?.data ?? payload
+          const mode = typeof data?.mode === 'string' ? data.mode : (data?.mode ?? nextMode)
+          const message = typeof data?.message === 'string' ? data.message : (data?.message != null ? String(data.message) : '')
           setTradingModeStatus({
             loading: false,
-            mode: payload?.mode ?? nextMode,
-            message: payload?.message ?? '',
+            mode,
+            message,
             error: null,
           })
         },
@@ -1603,7 +1611,7 @@ function App() {
       fetchTradingMode()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, selectedSettingId, isAuthenticated])
+  }, [activeTab, reportConfigId, isAuthenticated])
 
   // SignalR connection for real-time order updates
   useEffect(() => {
@@ -1624,14 +1632,10 @@ function App() {
           .build()
 
         // Listen for order updates before starting connection
-        connection.on('OrderUpdated', (data) => {
+        connection.on('OrderUpdated', () => {
           if (!isMounted) return
-          // Reload/update UI
-          fetchOrders('ordersSignalR')
-          // Update next buy price after order update from SignalR
-          if (fetchNextBuyPriceRef.current) {
-            fetchNextBuyPriceRef.current()
-          }
+          if (fetchOrdersRef.current) fetchOrdersRef.current('ordersSignalR')
+          if (fetchNextBuyPriceRef.current) fetchNextBuyPriceRef.current()
         })
 
         // Start connection
@@ -1642,12 +1646,12 @@ function App() {
           return
         }
 
-        
         // Join group for config ID "1" (can be made dynamic based on selectedSettingId)
         await connection.invoke('JoinOrderGroup', '1')
       } catch (err) {
-        if (isMounted) {
-        }
+        // Expected when cleanup runs during negotiation; avoid logging
+        if (!isMounted || (err?.message && String(err.message).includes('negotiation'))) return
+        console.error('SignalR orders connection failed:', err)
       }
     }
 
@@ -1657,12 +1661,10 @@ function App() {
     return () => {
       isMounted = false
       if (connection) {
-        connection.stop().catch((err) => {
-          // Ignore errors during cleanup
-        })
+        connection.stop().catch(() => {})
       }
     }
-  }, [apiBase, fetchOrders])
+  }, [apiBase])
 
   // Play alert sound
   const playAlertSound = useCallback(() => {
@@ -1727,12 +1729,9 @@ function App() {
             alertType.includes('sell')
 
           // If it's an Order Buy/Sell alert, refresh orders
-          if (isOrderAlert) {
-            fetchOrders('ordersSignalRAlert', ordersPage, ordersPageSize, orderFilter)
-            // Update next buy price after order alert from SignalR
-            if (fetchNextBuyPriceRef.current) {
-              fetchNextBuyPriceRef.current()
-            }
+          if (isOrderAlert && fetchOrdersRef.current) {
+            fetchOrdersRef.current('ordersSignalRAlert', ordersPage, ordersPageSize, orderFilter)
+            if (fetchNextBuyPriceRef.current) fetchNextBuyPriceRef.current()
           }
 
           // Refresh unread count
@@ -1755,32 +1754,25 @@ function App() {
           return
         }
 
-        
         // Join all alerts group
         await alertConnection.invoke('JoinAllAlerts')
       } catch (err) {
-        if (isMounted) {
-        }
+        if (!isMounted || (err?.message && String(err.message).includes('negotiation'))) return
+        console.error('SignalR alerts connection failed:', err)
       }
     }
 
-    // Request notification permission on mount
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission()
     }
 
     connectAlerts()
 
-    // Cleanup on unmount
     return () => {
       isMounted = false
-      if (alertConnection) {
-        alertConnection.stop().catch((err) => {
-          // Ignore errors during cleanup
-        })
-      }
+      if (alertConnection) alertConnection.stop().catch(() => {})
     }
-  }, [apiBase, playAlertSound, fetchOrders, fetchUnreadCount, ordersPage, ordersPageSize, orderFilter])
+  }, [apiBase, playAlertSound, fetchUnreadCount, ordersPage, ordersPageSize, orderFilter])
 
   const formatDateTime = (value) => {
     if (!value) return '-'
@@ -6852,8 +6844,10 @@ function App() {
                   {tradingModeStatus.loading
                     ? '...'
                     : tradingModeStatus.error
-                      ? tradingModeStatus.error
-                      : tradingModeStatus.message || tradingModeStatus.mode || '—'}
+                      ? String(tradingModeStatus.error)
+                      : (typeof tradingModeStatus.message === 'string' && tradingModeStatus.message) ||
+                        (typeof tradingModeStatus.mode === 'string' && tradingModeStatus.mode) ||
+                        '—'}
                 </span>
               </div>
               <button
