@@ -1,5 +1,5 @@
 {
     "API_BASE_URL_Production": "https://api.cayoshibot.com/api",
-    "API_BASE_URL_Development":  "https://api.cayoshibot.com/api",
+    "API_BASE_URL_Development": "http://localhost:5081/api",
     "API_BASE_URL_Binance": "https://api.binance.com/api/v3/klines"
 }

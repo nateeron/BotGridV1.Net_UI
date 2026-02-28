@@ -297,7 +297,7 @@ const toCandle = (raw) => {
   }
 }
 
-const fetchBinanceKlines = async ({ symbol, interval = '1m', endTime } = {}) => {
+const fetchBinanceKlines = async ({ symbol, interval = '3m', endTime } = {}) => {
   const url = new URL('https://api.binance.com/api/v3/klines')
   url.searchParams.set('symbol', (symbol || 'XRPUSDT').toUpperCase())
   url.searchParams.set('interval', interval)
@@ -426,6 +426,7 @@ function App() {
   })
   const [buyPauseStatus, setBuyPauseStatus] = useState({ isPaused: false, loading: false, message: '' })
   const [tradingModeStatus, setTradingModeStatus] = useState({ loading: false, mode: null, message: '', error: null })
+  const [mlData, setMlData] = useState({ ml: null, totalBalance: null, totalDebt: null, loading: false, error: null })
   const [settings, setSettings] = useState([])
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [settingsError, setSettingsError] = useState(null)
@@ -446,7 +447,7 @@ function App() {
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false)
   const [viewMode, setViewMode] = useState(() => loadPrimitiveState('viewMode', 'priceChart')) // 'chart', 'calculate', 'trade', 'priceChart'
   const [priceChartInterval, setPriceChartInterval] = useState(() =>
-    loadPrimitiveState('priceChartInterval', '1m')
+    loadPrimitiveState('priceChartInterval', '3m')
   )
   const [customChartSymbol, setCustomChartSymbol] = useState(() =>
     loadPrimitiveState('customChartSymbol', 'XRPUSDT')
@@ -536,7 +537,7 @@ function App() {
     const stored = loadPrimitiveState('reportConfigId', null)
     return stored !== null ? Number(stored) : null
   })
-  const [reportPeriod, setReportPeriod] = useState(() => loadPrimitiveState('reportPeriod', '1M'))
+  const [reportPeriod, setReportPeriod] = useState(() => loadPrimitiveState('reportPeriod', '3M'))
   const [orderChartView, setOrderChartView] = useState(() => loadPrimitiveState('orderChartView', 'day')) // 'day' or 'month'
   const [allCoinsData, setAllCoinsData] = useState({
     coins: [],
@@ -604,7 +605,7 @@ function App() {
         waitSell: {
           visible: true,
           type: 'dot',
-          color: '#FFA500',
+          color: '#b97331',
         },
         nextEntry: {
           visible: true,
@@ -657,7 +658,7 @@ function App() {
   }, [chartOrders, viewMode, activeTab])
 
   useEffect(() => {
-    priceChartEngineRef.current.interval = priceChartInterval || '1m'
+    priceChartEngineRef.current.interval = priceChartInterval || '3m'
   }, [priceChartInterval])
 
   // Check and refresh token on app load if authenticated
@@ -668,6 +669,14 @@ function App() {
       })
     }
   }, []) // Only run on mount
+
+  // Reload page every 3 minutes
+  useEffect(() => {
+    const reloadInterval = setInterval(() => {
+      window.location.reload()
+    }, 3 * 60 * 1000) // 3 minutes
+    return () => clearInterval(reloadInterval)
+  }, [])
 
   // Auto check and refresh token periodically
   useEffect(() => {
@@ -1352,6 +1361,32 @@ function App() {
     }
   }
 
+  const fetchML = async () => {
+    if (!reportConfigId) return
+    setMlData((prev) => ({ ...prev, loading: true, error: null }))
+    try {
+      await runRequest('ml', 'Binace/Get_ML', {
+        method: 'POST',
+        payload: { ConfigId: reportConfigId },
+        onSuccess: (payload) => {
+          const data = payload?.data ?? payload
+          setMlData({
+            ml: data?.ml ?? null,
+            totalBalance: data?.totalBalance ?? null,
+            totalDebt: data?.totalDebt ?? null,
+            loading: false,
+            error: null,
+          })
+        },
+        onError: (err) => {
+          setMlData((prev) => ({ ...prev, loading: false, error: err?.message || err?.data }))
+        },
+      })
+    } catch (err) {
+      setMlData((prev) => ({ ...prev, loading: false, error: err?.message }))
+    }
+  }
+
   const fetchAllCoins = async () => {
     if (!reportConfigId) return
     setAllCoinsLoading(true)
@@ -1609,6 +1644,13 @@ function App() {
   useEffect(() => {
     if (activeTab === 'orders' && isAuthenticated) {
       fetchTradingMode()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, reportConfigId, isAuthenticated])
+
+  useEffect(() => {
+    if (activeTab === 'orders' && isAuthenticated && reportConfigId) {
+      fetchML()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, reportConfigId, isAuthenticated])
@@ -3228,7 +3270,7 @@ function App() {
         if (_minPrice > 0 && buyTime) {
           const lineConfig = lines.waitSell
           const lineType = lineConfig?.type || 'dot'
-          const lineColor = lineConfig?.color || '#FFA500'
+          const lineColor = lineConfig?.color || '#b97331'
           const orderId = order?.id || order?.orderBuyID || ''
           const orderIdText = orderId ? `#${orderId} ` : ''
 
@@ -4236,59 +4278,24 @@ function App() {
         <section className="card price-chart-card" style={fullscreenStyle}>
           <header className="price-chart-header">
             <div>
-              <p className="eyebrow">Price Chart</p>
-              <div className="price-chart-symbol-row">
-                <h3>{getChartSymbol()} - Real-time</h3>
-                <select
-                  className="price-chart-symbol-select"
-                  value={customChartSymbol}
-                  onChange={(e) => handlePriceChartSymbolChange(e.target.value)}
-                >
-                  {priceChartSymbolOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="price-chart-symbol-select"
-                  value={chartOrdersLimit}
-                  onChange={(e) => {
-                    setChartOrdersLimit(e.target.value)
-                    // Save to localStorage
-                    if (typeof window !== 'undefined') {
-                      localStorage.setItem('chartOrdersLimit', e.target.value)
-                    }
-                    // Fetch new data with new limit
-                    setTimeout(() => {
-                      fetchChartOrders()
-                    }, 100)
-                  }}
-                  style={{ marginLeft: '8px', minWidth: '100px' }}
-                >
-                  <option value="20">Limit: 20</option>
-                  <option value="50">Limit: 50</option>
-                  <option value="100">Limit: 100</option>
-                  <option value="200">Limit: 200</option>
-                  <option value="500">Limit: 500</option>
-                  <option value="all">Limit: All</option>
-                </select>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <p className="eyebrow" style={{ margin: 0 }}>Price Chart</p>
+                {lastPrice && (
+                  <p className="eyebrow mono" style={{ margin: 0 }}>
+                    Last Close: {lastPrice}
+                    {nextBuyToNextSellPercent !== null && (
+                      <span style={{ marginLeft: '8px', color: '#00AEFF' }}>
+                        | NextBuy→NextSell: {nextBuyToNextSellPercent >= 0 ? '+' : ''}{nextBuyToNextSellPercent.toFixed(3)}%
+                      </span>
+                    )}
+                    {lastActionToNextBuyPercent !== null && (
+                      <span style={{ marginLeft: '8px', color: '#808080' }}>
+                        | LastAction→NextBuy: {lastActionToNextBuyPercent >= 0 ? '+' : ''}{lastActionToNextBuyPercent.toFixed(3)}%
+                      </span>
+                    )}
+                  </p>
+                )}
               </div>
-              {lastPrice && (
-                <p className="eyebrow mono" style={{ marginTop: '4px' }}>
-                  Last Close: {lastPrice}
-                  {nextBuyToNextSellPercent !== null && (
-                    <span style={{ marginLeft: '8px', color: '#00AEFF' }}>
-                      | NextBuy→NextSell: {nextBuyToNextSellPercent >= 0 ? '+' : ''}{nextBuyToNextSellPercent.toFixed(3)}%
-                    </span>
-                  )}
-                  {lastActionToNextBuyPercent !== null && (
-                    <span style={{ marginLeft: '8px', color: '#808080' }}>
-                      | LastAction→NextBuy: {lastActionToNextBuyPercent >= 0 ? '+' : ''}{lastActionToNextBuyPercent.toFixed(3)}%
-                    </span>
-                  )}
-                </p>
-              )}
             </div>
             <div className="price-chart-header-actions">
               <div className="price-chart-toolbar" role="group" aria-label="Timeframes">
@@ -4303,6 +4310,24 @@ function App() {
                     {option.label}
                   </button>
                 ))}
+                <select
+                  className="price-chart-symbol-select"
+                  value={chartOrdersLimit}
+                  onChange={(e) => {
+                    setChartOrdersLimit(e.target.value)
+                    if (typeof window !== 'undefined') {
+                      localStorage.setItem('chartOrdersLimit', e.target.value)
+                    }
+                    setTimeout(() => fetchChartOrders(), 100)
+                  }}
+                >
+                  <option value="20">Limit: 20</option>
+                  <option value="50">Limit: 50</option>
+                  <option value="100">Limit: 100</option>
+                  <option value="200">Limit: 200</option>
+                  <option value="500">Limit: 500</option>
+                  <option value="all">Limit: All</option>
+                </select>
               </div>
               <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <button
@@ -4438,7 +4463,7 @@ function App() {
             ref={priceChartContainerRef}
             className="price-chart-canvas"
             style={{
-              width: '100%',
+              width: '99%',
               height: `${chartHeight}px`,
               position: 'relative',
             }}
@@ -4522,7 +4547,7 @@ function App() {
             <label>
               Cal 1
               <input
-                type="number"
+                type="text"
                 step="0.0001"
                 value={cal1}
                 onChange={(e) => setCal1(e.target.value)}
@@ -4532,7 +4557,7 @@ function App() {
             <label>
               Cal 2
               <input
-                type="number"
+                type="text"
                 step="0.0001"
                 value={cal2}
                 onChange={(e) => setCal2(e.target.value)}
@@ -4570,7 +4595,7 @@ function App() {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <input
-                      type="number"
+                      type="text"
                       step="0.01"
                       min="0"
                       max="100"
@@ -4647,7 +4672,7 @@ function App() {
             <label>
               เปอร์เซ็นต์ต่อไม้ (% ต่อ 1 ไม้)
               <input
-                type="number"
+                type="text"
                 step="0.00001"
                 value={percentPerStep}
                 onChange={(e) => setPercentPerStep(e.target.value)}
@@ -4657,7 +4682,7 @@ function App() {
             <label>
               จำนวนไม้
               <input
-                type="number"
+                type="text"
                 step="1"
                 value={steps}
                 onChange={(e) => setSteps(e.target.value)}
@@ -4684,7 +4709,7 @@ function App() {
             <label>
               เปอร์เซ็นต์ต่อไม้ (% ต่อ 1 ไม้)
               <input
-                type="number"
+                type="text"
                 step="0.00001"
                 value={percentPerStep2}
                 onChange={(e) => setPercentPerStep2(e.target.value)}
@@ -4694,7 +4719,7 @@ function App() {
             <label>
               เปอร์เซ็นต์รวมที่ต้องการ (%)
               <input
-                type="number"
+                type="text"
                 step="0.01"
                 value={targetPercent}
                 onChange={(e) => setTargetPercent(e.target.value)}
@@ -4780,7 +4805,7 @@ function App() {
             <label>
               Price
               <input
-                type="number"
+                type="text"
                 step="0.0001"
                 value={tradeForm.Price}
                 onChange={(e) => setTradeForm((prev) => ({ ...prev, Price: e.target.value }))}
@@ -4807,7 +4832,7 @@ function App() {
             <label>
               Coin Quantity
               <input
-                type="number"
+                type="text"
                 step="0.0001"
                 value={tradeForm.CoinQuantity}
                 onChange={(e) => setTradeForm((prev) => ({ ...prev, CoinQuantity: e.target.value }))}
@@ -4817,7 +4842,7 @@ function App() {
             <label>
               USD Amount
               <input
-                type="number"
+                type="text"
                 step="0.01"
                 value={tradeForm.UsdAmount}
                 onChange={(e) => setTradeForm((prev) => ({ ...prev, UsdAmount: e.target.value }))}
@@ -4843,7 +4868,7 @@ function App() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <input
-                    type="number"
+                    type="text"
                     step="0.01"
                     min="0"
                     max="100"
@@ -6518,7 +6543,7 @@ function App() {
           <label>
             Limit
             <input
-              type="number"
+              type="text"
               value={filledOrdersForm.Limit || 25}
               onChange={(e) => setFilledOrdersForm((prev) => ({ ...prev, Limit: Number(e.target.value) || 25 }))}
               min="1"
@@ -6794,6 +6819,40 @@ function App() {
 
           {/* BuyPause and Bot Controls */}
           <div className="top-bar-controls">
+            {/* Margin ML Info */}
+            {activeTab === 'orders' && (
+              <div className="top-bar-control-item">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.875rem', opacity: 0.7 }}>Margin ML:</span>
+                  <span
+                    style={{
+                      fontSize: '0.875rem',
+                      opacity: 0.9,
+                      color:
+                        mlData.ml != null
+                          ? Number(mlData.ml) > 1.8
+                            ? '#44ff44'
+                            : Number(mlData.ml) > 1.5
+                              ? '#e88226'
+                              : '#d63408'
+                          : undefined,
+                    }}
+                  >
+                    {mlData.loading ? '...' : mlData.error ? mlData.error : mlData.ml != null ? Number(mlData.ml).toFixed(2) : '—'}
+                  </span>
+                  <span style={{ opacity: 0.5 }}>|</span>
+                  <span style={{ fontSize: '0.875rem', opacity: 0.7 }}>totalBalance:</span>
+                  <span style={{ fontSize: '0.875rem', opacity: 0.9, color: '#3fd9e8' }}>
+                    {mlData.loading ? '...' : mlData.totalBalance != null ? formatNumber(mlData.totalBalance, 2) : '—'}
+                  </span>
+                  <span style={{ opacity: 0.5 }}>|</span>
+                  <span style={{ fontSize: '0.875rem', opacity: 0.7 }}>Debt:</span>
+                  <span style={{ fontSize: '0.875rem', opacity: 0.9, color: '#3fd9e8' }}>
+                    {mlData.loading ? '...' : mlData.totalDebt != null ? formatNumber(mlData.totalDebt, 2) : '—'}
+                  </span>
+                </div>
+              </div>
+            )}
             {/* BuyPause Status and Control */}
             <div className="top-bar-control-item">
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -6939,12 +6998,27 @@ function App() {
           🔔
           {unreadCount > 0 && <span className="unread-badge">{unreadCount}</span>}
         </button>
-        <button 
-          className="top-control-btn" 
-          onClick={playAlertSound} 
-          title="Test Alert Sound"
+        <button
+          className="top-control-btn"
+          onClick={() => window.open('https://report.cayoshibot.com/', '_blank', 'noopener,noreferrer')}
+          title="Report"
         >
-          🔊
+          Re
+        </button>
+        <button
+          className="top-control-btn"
+          onClick={() => window.open('https://reportmagin.cayoshibot.com/', '_blank', 'noopener,noreferrer')}
+          title="Binance Cross Margin Orders"
+        >
+          M
+        </button>
+        <button
+          className="top-control-btn"
+          onClick={() => window.open('https://nateeron.github.io/CalculateMarginLevel/', '_blank', 'noopener,noreferrer')}
+          title="Calculate Margin Level"
+          style={{fontSize: '13px' }}
+        >
+          CML
         </button>
         <button className="top-control-btn" onClick={clearLogs} title="Clear All Logs">
           🗑
@@ -6995,7 +7069,7 @@ function App() {
               <label>
                 Config Version
                 <input
-                  type="number"
+                  type="text"
                   value={modalSetting.Config_Version ?? ''}
                   onChange={(e) => setModalSetting((prev) => ({ ...prev, Config_Version: Number(e.target.value) }))}
                 />
@@ -7007,7 +7081,7 @@ function App() {
               <label>
                 Percent Buy
                 <input
-                  type="number"
+                  type="text"
                   step="0.01"
                   value={modalSetting.PERCEN_BUY ?? 0}
                   onChange={(e) => setModalSetting((prev) => ({ ...prev, PERCEN_BUY: Number(e.target.value) }))}
@@ -7016,7 +7090,7 @@ function App() {
               <label>
                 Percent Sell
                 <input
-                  type="number"
+                  type="text"
                   step="0.01"
                   value={modalSetting.PERCEN_SELL ?? 0}
                   onChange={(e) => setModalSetting((prev) => ({ ...prev, PERCEN_SELL: Number(e.target.value) }))}
@@ -7048,7 +7122,7 @@ function App() {
             <label>
               Buy Amount USD
               <input
-                type="number"
+                type="text"
                 step="0.1"
                 value={modalSetting.buyAmountUSD ?? 0}
                 onChange={(e) => setModalSetting((prev) => ({ ...prev, buyAmountUSD: Number(e.target.value) }))}
@@ -7090,7 +7164,7 @@ function App() {
               <label>
                 Quantity
                 <input
-                  type="number"
+                  type="text"
                   step="0.0001"
                   value={orderModalData.coinQuantity ?? 0}
                   onChange={(e) =>
@@ -7107,7 +7181,7 @@ function App() {
               <label>
                 Price Buy
                 <input
-                  type="number"
+                  type="text"
                   step="0.0001"
                   value={orderModalData.priceBuy ?? 0}
                   onChange={(e) => setOrderModalData((prev) => ({ ...prev, priceBuy: Number(e.target.value) }))}
@@ -7116,7 +7190,7 @@ function App() {
               <label>
                 Price Wait Sell
                 <input
-                  type="number"
+                  type="text"
                   step="0.0001"
                   value={orderModalData.priceWaitSell ?? 0}
                   onChange={(e) => setOrderModalData((prev) => ({ ...prev, priceWaitSell: Number(e.target.value) }))}
@@ -7125,7 +7199,7 @@ function App() {
               <label>
                 Price Sell Actual
                 <input
-                  type="number"
+                  type="text"
                   step="0.0001"
                   value={orderModalData.priceSellActual ?? 0}
                   onChange={(e) => setOrderModalData((prev) => ({ ...prev, priceSellActual: Number(e.target.value) }))}
@@ -7134,7 +7208,7 @@ function App() {
               <label>
                 Profit/Loss
                 <input
-                  type="number"
+                  type="text"
                   step="0.0001"
                   value={orderModalData.profitLoss ?? 0}
                   readOnly
@@ -7144,7 +7218,7 @@ function App() {
             <label>
               Buy Amount USD
               <input
-                type="number"
+                type="text"
                 step="0.01"
                 value={orderModalData.buyAmountUSD ?? 0}
                 onChange={(e) => setOrderModalData((prev) => ({ ...prev, buyAmountUSD: Number(e.target.value) }))}
@@ -7245,7 +7319,7 @@ function App() {
               <label>
                 Config ID *
                 <input
-                  type="number"
+                  type="text"
                   value={buyNowForm.ConfigId || ''}
                   onChange={(e) => setBuyNowForm((prev) => ({ ...prev, ConfigId: Number(e.target.value) || null }))}
                   placeholder="1"
@@ -7256,7 +7330,7 @@ function App() {
             <label>
               Buy Amount USD (Optional - override config)
               <input
-                type="number"
+                type="text"
                 step="0.01"
                 value={buyNowForm.BuyAmountUSD}
                 onChange={(e) => setBuyNowForm((prev) => ({ ...prev, BuyAmountUSD: e.target.value }))}
@@ -7568,7 +7642,7 @@ function App() {
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
                       <span style={{ fontSize: '11px', opacity: 0.7 }}>Limit (Last N)</span>
                       <input
-                        type="number"
+                        type="text"
                         min="1"
                         value={tradeLineSettings?.lines?.['buy-Sell']?.limit ?? 200}
                         onChange={(e) =>
@@ -7586,7 +7660,7 @@ function App() {
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
                       <span style={{ fontSize: '11px', opacity: 0.7 }}>Time Offset (Hours)</span>
                       <input
-                        type="number"
+                        type="text"
                         value={tradeLineSettings?.lines?.['buy-Sell']?.timeOffset ?? 14}
                         onChange={(e) =>
                           setTradeLineSettings((prev) => ({
@@ -7654,14 +7728,14 @@ function App() {
                             width: '24px',
                             height: '24px',
                             borderRadius: '50%',
-                            backgroundColor: tradeLineSettings?.lines?.waitSell?.color || '#FFA500',
+                            backgroundColor: tradeLineSettings?.lines?.waitSell?.color || '#b97331',
                             border: '2px solid var(--border)',
                             flexShrink: 0,
                           }}
                         />
                         <input
                           type="color"
-                          value={tradeLineSettings?.lines?.waitSell?.color || '#FFA500'}
+                          value={tradeLineSettings?.lines?.waitSell?.color || '#b97331'}
                           onChange={(e) =>
                             setTradeLineSettings((prev) => ({
                               ...prev,
